@@ -72,58 +72,6 @@ struct ProtocolMessage {
 
 // pull out the type of messages sent by our config
 
-static void on_message_server(server *s, websocketpp::connection_hdl hdl, message_ptr msg) {
-	duckdb::MemoryStream read_stream(duckdb::data_ptr_cast((void *)msg->get_payload().data()),
-	                                 static_cast<idx_t>(msg->get_payload().size()));
-	duckdb::BinaryDeserializer deserializer(read_stream);
-	auto received_message = duckdb::ProtocolMessage::Deserialize(deserializer);
-
-	printf("message type %lld\n", (uint8_t)received_message->type);
-
-	switch (received_message->type) {
-	case duckdb::MessageType::BIND: {
-		D_ASSERT(received_message->query.size() > 0);
-		printf("BIND %s\n", received_message->query.c_str());
-
-		duckdb::ProtocolMessage response_message;
-		response_message.type = duckdb::MessageType::BIND_RESULT;
-
-		// TODO we need a connection object here for the actual bind
-		response_message.types.push_back(duckdb::LogicalType::BOOLEAN);
-		response_message.names.push_back("dummy");
-
-		duckdb::MemoryStream write_stream; // TODO pass allocator here
-		duckdb::BinarySerializer serializer(write_stream);
-		serializer.Begin();
-		response_message.Serialize(serializer);
-		serializer.End();
-
-		try {
-
-			s->send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-		} catch (websocketpp::exception const &e) {
-			// TODO we should not fail here but log something
-			std::cout << "bind reply failed because: "
-			          << "(" << e.what() << ")" << std::endl;
-		}
-		break;
-	}
-	default: {
-		printf("eeek!\n");
-		// TODO complain, but do not exit
-		break;
-	}
-	}
-
-	// try {
-	//     s->send(hdl, msg->get_payload(), msg->get_opcode());
-	// } catch (websocketpp::exception const & e) {
-	// 	// TODO we should not fail here but log something
-	//     std::cout << "Echo failed because: "
-	//               << "(" << e.what() << ")" << std::endl;
-	// }
-}
-
 std::string get_password() {
 	throw std::runtime_error("get_password called without a valid password");
 }
@@ -190,22 +138,75 @@ context_ptr on_tls_init_server(tls_mode mode, websocketpp::connection_hdl hdl) {
 	return ctx;
 }
 
+struct RpcServer {
+	RpcServer(ClientContext &context_p, server &s_p) : context(context_p), s(s_p) {
+		s.set_message_handler(bind(&RpcServer::on_message, this, ::_1, ::_2));
+	}
+
+	// main switcheroo happens here
+	void on_message(websocketpp::connection_hdl hdl, message_ptr msg) {
+		duckdb::MemoryStream read_stream(duckdb::data_ptr_cast((void *)msg->get_payload().data()),
+		                                 static_cast<idx_t>(msg->get_payload().size()));
+		duckdb::BinaryDeserializer deserializer(read_stream);
+		auto received_message = duckdb::ProtocolMessage::Deserialize(deserializer);
+
+		//		printf("message type %lld\n", (uint8_t)received_message->type);
+
+		switch (received_message->type) {
+		case duckdb::MessageType::BIND: {
+			D_ASSERT(received_message->query.size() > 0);
+			printf("BIND %s\n", received_message->query.c_str());
+
+			duckdb::ProtocolMessage response_message;
+			response_message.type = duckdb::MessageType::BIND_RESULT;
+
+			auto internal_connection = Connection(*context.db);
+			auto prepare_result = internal_connection.Prepare(received_message->query);
+
+			response_message.types = prepare_result->GetTypes();
+			response_message.names = prepare_result->GetNames();
+
+			duckdb::MemoryStream write_stream; // TODO pass allocator here
+			duckdb::BinarySerializer serializer(write_stream);
+			serializer.Begin();
+			response_message.Serialize(serializer);
+			serializer.End();
+
+			try {
+				s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+			} catch (websocketpp::exception const &e) {
+				// TODO we should not fail here but log something
+				std::cout << "bind reply failed because: "
+				          << "(" << e.what() << ")" << std::endl;
+			}
+			break;
+		}
+		default: {
+			printf("eeek!\n");
+			// TODO complain, but do not exit
+			break;
+		}
+		}
+	}
+	ClientContext &context;
+	server &s;
+};
+
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	// Create a server endpoint
-	server echo_server;
-	echo_server.set_access_channels(websocketpp::log::alevel::none);
+	server s;
+	s.set_access_channels(websocketpp::log::alevel::none);
 	// Initialize ASIO
-	echo_server.init_asio();
+	s.init_asio();
+	RpcServer rcp_server(state.GetContext(), s);
 
-	// Register our message handler
-	echo_server.set_message_handler(bind(&on_message_server, &echo_server, ::_1, ::_2));
 	// echo_server.set_http_handler(bind(&on_http,&echo_server,::_1));
-	echo_server.set_tls_init_handler(bind(&on_tls_init_server, MOZILLA_INTERMEDIATE, ::_1));
+	s.set_tls_init_handler(bind(&on_tls_init_server, MOZILLA_INTERMEDIATE, ::_1));
 	int port = 4242;
-	echo_server.listen(port);
-	echo_server.start_accept();
+	s.listen(port);
+	s.start_accept();
 	printf("Listening on port %d\n", port);
-	echo_server.run();
+	s.run();
 }
 
 static void RpcTableFun(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
