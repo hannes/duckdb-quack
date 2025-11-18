@@ -20,6 +20,15 @@
 
 #include <iostream>
 
+typedef websocketpp::server<websocketpp::config::asio_tls> server;
+typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
+typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
+typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
+
+using websocketpp::lib::bind;
+using websocketpp::lib::placeholders::_1;
+using websocketpp::lib::placeholders::_2;
+
 namespace duckdb {
 
 // TODO split this up in separate messages
@@ -61,18 +70,7 @@ struct ProtocolMessage {
 	DataChunk data;
 };
 
-// TODO move this other stuff into the namespace, too
-} // namespace duckdb
-
-typedef websocketpp::server<websocketpp::config::asio_tls> server;
-
-using websocketpp::lib::bind;
-using websocketpp::lib::placeholders::_1;
-using websocketpp::lib::placeholders::_2;
-
 // pull out the type of messages sent by our config
-typedef websocketpp::config::asio::message_type::ptr message_ptr;
-typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 
 static void on_message_server(server *s, websocketpp::connection_hdl hdl, message_ptr msg) {
 	duckdb::MemoryStream read_stream(duckdb::data_ptr_cast((void *)msg->get_payload().data()),
@@ -192,14 +190,6 @@ context_ptr on_tls_init_server(tls_mode mode, websocketpp::connection_hdl hdl) {
 	return ctx;
 }
 
-typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
-
-using websocketpp::lib::bind;
-using websocketpp::lib::placeholders::_1;
-using websocketpp::lib::placeholders::_2;
-
-namespace duckdb {
-
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	// Create a server endpoint
 	server echo_server;
@@ -222,73 +212,64 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &data, DataCh
 	throw NotImplementedException("oof");
 }
 
-typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
-static void on_message_client(client *c, websocketpp::connection_hdl hdl, message_ptr msg) {
-
-	websocketpp::lib::error_code ec;
-
-	if (ec) {
-		std::cout << "Bind failed because: " << ec.message() << std::endl;
-	}
-
-	duckdb::MemoryStream read_stream(duckdb::data_ptr_cast((void *)msg->get_payload().data()),
-	                                 static_cast<idx_t>(msg->get_payload().size()));
-	duckdb::BinaryDeserializer deserializer(read_stream);
-	auto received_message = duckdb::ProtocolMessage::Deserialize(deserializer);
-
-	D_ASSERT(received_message->type == MessageType::BIND_RESULT);
-
-	// TODO fill names and types
-
-	c->close(hdl, websocketpp::close::status::normal, "");
-}
-
-// static bool verify_certificate(const char * hostname, bool preverified, asio::ssl::verify_context& ctx) {
-// 	return true; // cough
-// }
-
 static context_ptr on_tls_init_client(const char *hostname, websocketpp::connection_hdl) {
 	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
-
 	try {
-
-		// TODO ???
+		// TODO is this required??
 		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
 		                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
 
 		ctx->set_verify_mode(asio::ssl::verify_none);
-		// ctx->set_verify_callback(bind(&verify_certificate, hostname, ::_1, ::_2));
-
-		// // Here we load the CA certificates of all CA's that this client trusts.
-		// ctx->load_verify_file("ca-chain.cert.pem");
 	} catch (std::exception &e) {
 		throw InvalidInputException(e.what());
 	}
 	return ctx;
 }
 
-static void on_open(client *c, websocketpp::connection_hdl hdl) {
-	std::string msg = "Hello";
+struct BindClient {
+	BindClient(string &query_p, client &c_p, vector<LogicalType> &types_p, vector<string> &names_p)
+	    : query(query_p), c(c_p), types(types_p), names(names_p) {
+		c.set_message_handler(bind(&BindClient::on_bind_message, this, ::_1, ::_2));
+		c.set_open_handler(bind(&BindClient::on_bind_open, this, ::_1));
+		c.set_fail_handler(bind(&BindClient::on_fail, this, ::_1));
+	}
+	// we immediately send a message
+	void on_bind_open(websocketpp::connection_hdl hdl) {
+		ProtocolMessage bind_message;
+		bind_message.type = MessageType::BIND;
+		bind_message.query = query;
 
-	duckdb::ProtocolMessage bind_message;
-	bind_message.type = duckdb::MessageType::BIND;
+		MemoryStream write_stream; // TODO pass allocator here
+		BinarySerializer serializer(write_stream);
+		serializer.Begin();
+		bind_message.Serialize(serializer);
+		serializer.End();
+		c.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+	}
+	// we now expect a bind result
+	void on_bind_message(websocketpp::connection_hdl hdl, message_ptr msg) {
+		MemoryStream read_stream(data_ptr_cast((void *)msg->get_payload().data()), msg->get_payload().size());
+		BinaryDeserializer deserializer(read_stream);
+		auto received_message = ProtocolMessage::Deserialize(deserializer);
+		D_ASSERT(received_message->type == MessageType::BIND_RESULT);
 
-	// TODO we need a connection object here for the actual bind
-	bind_message.query = "SELECT true AS dummy";
+		// TODO uuugly
+		names = received_message->names;
+		types = received_message->types;
+		c.close(hdl, websocketpp::close::status::normal, "");
+	}
+	// boo
+	void on_fail(websocketpp::connection_hdl hdl) {
+		client::connection_ptr con = c.get_con_from_hdl(hdl);
+		// TODO there is more error stuff to expose here
+		throw InvalidInputException("RPC request failed: %s", con->get_ec().message().c_str());
+	}
 
-	duckdb::MemoryStream write_stream; // TODO pass allocator here
-	duckdb::BinarySerializer serializer(write_stream);
-	serializer.Begin();
-	bind_message.Serialize(serializer);
-	serializer.End();
-	c->send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-}
-
-void on_fail(client *c, websocketpp::connection_hdl hdl) {
-	client::connection_ptr con = c->get_con_from_hdl(hdl);
-	// TODO there is more error stuff to expose here
-	throw InvalidInputException("RPC request failed: %s", con->get_ec().message().c_str());
-}
+	string &query;
+	client &c;
+	vector<LogicalType> &types;
+	vector<string> &names;
+};
 
 static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
@@ -307,10 +288,9 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 		c.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
 		c.set_user_agent("DuckDB");
 
-		// Register our message handler
-		c.set_message_handler(bind(&on_message_client, &c, ::_1, ::_2));
-		c.set_open_handler(bind(&on_open, &c, ::_1));
-		c.set_fail_handler(bind(&on_fail, &c, ::_1));
+		// TODO refactor this moar
+		auto query = input.inputs[1].GetValue<string>();
+		BindClient client(query, c, return_types, names);
 
 		websocketpp::lib::error_code ec;
 		client::connection_ptr con = c.get_connection(uri, ec);
@@ -322,21 +302,16 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	} catch (websocketpp::exception const &e) {
 		throw duckdb::InvalidInputException(e.what());
 	}
-
-	printf("got here\n");
-
-	return_types.push_back(LogicalType::BOOLEAN);
-	names.push_back("dummy");
 	return nullptr;
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
 	// Register a scalar function
-	auto rpc_scalar_function = ScalarFunction("start_rpc_server", {}, LogicalType::VARCHAR, RpcScalarFun);
+	auto rpc_scalar_function = ScalarFunction("start_rpc_server", {}, LogicalType::VARCHAR, duckdb::RpcScalarFun);
 	loader.RegisterFunction(rpc_scalar_function);
 
-	auto rpc_table_function =
-	    TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcTableFun, RpcTableBindFun);
+	auto rpc_table_function = TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                                        duckdb::RpcTableFun, duckdb::RpcTableBindFun);
 	loader.RegisterFunction(rpc_table_function);
 }
 
