@@ -1,0 +1,23 @@
+# name: test/sql/rpc.test
+# description: test rpc extension
+# group: [sql]
+
+# Before we load the extension, this will fail
+statement error
+SELECT rpc('Sam');
+----
+Catalog Error: Scalar Function with name rpc does not exist!
+
+# Require statement will ensure this test is run with this extension loaded
+require rpc
+
+# Confirm the extension works
+query I
+SELECT rpc('Sam');
+----
+Rpc Sam 🐥
+
+query I
+SELECT rpc_openssl_version('Michael') ILIKE 'Rpc Michael, my linked OpenSSL version is OpenSSL%';
+----
+true
