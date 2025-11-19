@@ -32,19 +32,20 @@ using websocketpp::lib::placeholders::_2;
 namespace duckdb {
 
 // TODO split this up in separate messages
-// TODO generate this
+// TODO generate this like the rest
 
 enum class MessageType : uint8_t { INVALID = 0, BIND = 1, BIND_RESULT = 2, EXECUTE = 3, EXECUTE_RESULT = 4, ERROR = 5 };
 
 struct ProtocolMessage {
 	void Serialize(Serializer &serializer) {
+
 		serializer.WriteProperty<uint8_t>(1, "type", static_cast<uint8_t>(type));
 		serializer.WriteProperty<string>(2, "query", query);
 		serializer.WriteProperty<string>(3, "error", error);
 		serializer.WriteProperty<vector<LogicalType>>(4, "types", types);
 		serializer.WriteProperty<vector<string>>(5, "names", names);
 		if (type == MessageType::EXECUTE_RESULT) {
-			serializer.WriteObject(6, "data", [&](Serializer &serializer2) { data.Serialize(serializer2); });
+			serializer.WriteObject(6, "data", [&](Serializer &serializer2) { data->Serialize(serializer2); });
 		}
 	}
 
@@ -56,10 +57,10 @@ struct ProtocolMessage {
 		result->types = deserializer.ReadProperty<vector<LogicalType>>(4, "types");
 		result->names = deserializer.ReadProperty<vector<string>>(5, "names");
 		if (result->type == MessageType::EXECUTE_RESULT) {
+			result->data = make_uniq<DataChunk>();
 			deserializer.ReadObject(6, "data",
-			                        [&](Deserializer &deserializer2) { result->data.Deserialize(deserializer2); });
+			                        [&](Deserializer &deserializer2) { result->data->Deserialize(deserializer2); });
 		}
-
 		return result;
 	}
 	MessageType type;
@@ -67,10 +68,8 @@ struct ProtocolMessage {
 	string error;
 	vector<string> names;
 	vector<LogicalType> types;
-	DataChunk data;
+	unique_ptr<DataChunk> data;
 };
-
-// pull out the type of messages sent by our config
 
 std::string get_password() {
 	throw std::runtime_error("get_password called without a valid password");
@@ -145,29 +144,60 @@ struct RpcServer {
 
 	// main switcheroo happens here
 	void on_message(websocketpp::connection_hdl hdl, message_ptr msg) {
-		duckdb::MemoryStream read_stream(duckdb::data_ptr_cast((void *)msg->get_payload().data()),
-		                                 static_cast<idx_t>(msg->get_payload().size()));
-		duckdb::BinaryDeserializer deserializer(read_stream);
-		auto received_message = duckdb::ProtocolMessage::Deserialize(deserializer);
+		MemoryStream read_stream(data_ptr_cast((void *)msg->get_payload().data()),
+		                         static_cast<idx_t>(msg->get_payload().size()));
+		BinaryDeserializer deserializer(read_stream);
+		auto received_message = ProtocolMessage::Deserialize(deserializer);
 
 		//		printf("message type %lld\n", (uint8_t)received_message->type);
 
 		switch (received_message->type) {
-		case duckdb::MessageType::BIND: {
+		case MessageType::BIND: {
 			D_ASSERT(received_message->query.size() > 0);
 			printf("BIND %s\n", received_message->query.c_str());
 
-			duckdb::ProtocolMessage response_message;
-			response_message.type = duckdb::MessageType::BIND_RESULT;
+			ProtocolMessage response_message;
+			response_message.type = MessageType::BIND_RESULT;
 
 			auto internal_connection = Connection(*context.db);
+			// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 			auto prepare_result = internal_connection.Prepare(received_message->query);
 
 			response_message.types = prepare_result->GetTypes();
 			response_message.names = prepare_result->GetNames();
 
-			duckdb::MemoryStream write_stream; // TODO pass allocator here
-			duckdb::BinarySerializer serializer(write_stream);
+			MemoryStream write_stream; // TODO pass allocator here
+			BinarySerializer serializer(write_stream);
+			serializer.Begin();
+			response_message.Serialize(serializer);
+			serializer.End();
+
+			try {
+				s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+			} catch (websocketpp::exception const &e) {
+				// TODO we should not fail here but log something
+				std::cout << "bind reply failed because: "
+				          << "(" << e.what() << ")" << std::endl;
+			}
+			break;
+		}
+		case MessageType::EXECUTE: {
+			D_ASSERT(received_message->query.size() > 0);
+			printf("EXECUTE %s\n", received_message->query.c_str());
+
+			ProtocolMessage response_message;
+			response_message.type = MessageType::EXECUTE_RESULT;
+
+			// TODO we need to cache this connection in the ws connection somehow
+			auto internal_connection = Connection(*context.db);
+			// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
+			auto execute_result = internal_connection.Query(received_message->query);
+
+			response_message.data = execute_result->Fetch();
+
+			// TODO many
+			MemoryStream write_stream; // TODO pass allocator here
+			BinarySerializer serializer(write_stream);
 			serializer.Begin();
 			response_message.Serialize(serializer);
 			serializer.End();
@@ -193,24 +223,16 @@ struct RpcServer {
 };
 
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	// Create a server endpoint
 	server s;
 	s.set_access_channels(websocketpp::log::alevel::none);
-	// Initialize ASIO
 	s.init_asio();
 	RpcServer rcp_server(state.GetContext(), s);
-
-	// echo_server.set_http_handler(bind(&on_http,&echo_server,::_1));
 	s.set_tls_init_handler(bind(&on_tls_init_server, MOZILLA_INTERMEDIATE, ::_1));
 	int port = 4242;
 	s.listen(port);
 	s.start_accept();
 	printf("Listening on port %d\n", port);
 	s.run();
-}
-
-static void RpcTableFun(ClientContext &context, TableFunctionInput &data, DataChunk &output) {
-	throw NotImplementedException("oof");
 }
 
 static context_ptr on_tls_init_client(const char *hostname, websocketpp::connection_hdl) {
@@ -227,59 +249,9 @@ static context_ptr on_tls_init_client(const char *hostname, websocketpp::connect
 	return ctx;
 }
 
-struct BindClient {
-	BindClient(string &query_p, client &c_p, vector<LogicalType> &types_p, vector<string> &names_p)
-	    : query(query_p), c(c_p), types(types_p), names(names_p) {
-		c.set_message_handler(bind(&BindClient::on_bind_message, this, ::_1, ::_2));
-		c.set_open_handler(bind(&BindClient::on_bind_open, this, ::_1));
-		c.set_fail_handler(bind(&BindClient::on_fail, this, ::_1));
-	}
-	// we immediately send a message
-	void on_bind_open(websocketpp::connection_hdl hdl) {
-		ProtocolMessage bind_message;
-		bind_message.type = MessageType::BIND;
-		bind_message.query = query;
+struct RpcClient {
+	RpcClient(string &uri_p) : uri(uri_p) {
 
-		MemoryStream write_stream; // TODO pass allocator here
-		BinarySerializer serializer(write_stream);
-		serializer.Begin();
-		bind_message.Serialize(serializer);
-		serializer.End();
-		c.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-	}
-	// we now expect a bind result
-	void on_bind_message(websocketpp::connection_hdl hdl, message_ptr msg) {
-		MemoryStream read_stream(data_ptr_cast((void *)msg->get_payload().data()), msg->get_payload().size());
-		BinaryDeserializer deserializer(read_stream);
-		auto received_message = ProtocolMessage::Deserialize(deserializer);
-		D_ASSERT(received_message->type == MessageType::BIND_RESULT);
-
-		// TODO uuugly
-		names = received_message->names;
-		types = received_message->types;
-		c.close(hdl, websocketpp::close::status::normal, "");
-	}
-	// boo
-	void on_fail(websocketpp::connection_hdl hdl) {
-		client::connection_ptr con = c.get_con_from_hdl(hdl);
-		// TODO there is more error stuff to expose here
-		throw InvalidInputException("RPC request failed: %s", con->get_ec().message().c_str());
-	}
-
-	string &query;
-	client &c;
-	vector<LogicalType> &types;
-	vector<string> &names;
-};
-
-static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
-                                                vector<LogicalType> &return_types, vector<string> &names) {
-	// TODO this should come from input obviously
-	std::string uri = "wss://localhost:4242";
-	client c;
-
-	try {
-		// Set logging to be pretty verbose (everything except message payloads)
 		c.set_access_channels(websocketpp::log::alevel::none);
 		c.set_error_channels(websocketpp::log::alevel::none);
 		// c.clear_access_channels(websocketpp::log::alevel::frame_payload);
@@ -288,31 +260,183 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 		c.init_asio();
 		c.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
 		c.set_user_agent("DuckDB");
+		c.set_message_handler(bind(&RpcClient::OnMessage, this, ::_1, ::_2));
+		c.set_fail_handler(bind(&RpcClient::OnFail, this, ::_1));
 
-		// TODO refactor this moar
-		auto query = input.inputs[1].GetValue<string>();
-		BindClient client(query, c, return_types, names);
+		c.set_open_handler(bind(&RpcClient::OnOpen, this, ::_1));
+
+		conn_thread = std::thread([=]() {
+			ConnectionThread(this);
+			return 1;
+		});
+	}
+
+	static void ConnectionThread(void *rpc_client_p) {
+		auto rpc_client = (RpcClient *)rpc_client_p;
+		D_ASSERT(rpc_client);
 
 		websocketpp::lib::error_code ec;
-		client::connection_ptr con = c.get_connection(uri, ec);
+		rpc_client->con = rpc_client->c.get_connection(rpc_client->uri, ec);
 		if (ec) {
-			throw duckdb::InternalException(ec.message());
+			throw InternalException(ec.message());
 		}
-		c.connect(con);
-		c.run();
-	} catch (websocketpp::exception const &e) {
-		throw duckdb::InvalidInputException(e.what());
+		rpc_client->c.connect(rpc_client->con);
+		rpc_client->c.run();
 	}
-	return nullptr;
+
+	~RpcClient() {
+		if (con) {
+			con->close(websocketpp::close::status::normal, "");
+		}
+		conn_thread.join();
+	}
+
+	void OnOpen(websocketpp::connection_hdl hdl) {
+		SendInternal(hdl);
+	}
+
+	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
+		MemoryStream read_stream(data_ptr_cast((void *)msg->get_payload().data()), msg->get_payload().size());
+		BinaryDeserializer deserializer(read_stream);
+		auto received_message = ProtocolMessage::Deserialize(deserializer);
+		// printf("REC %d\n", received_message->type);
+		std::unique_lock<std::mutex> lock(messages_mutex);
+		messages.push_front(std::move(received_message));
+		messages_wait.notify_one();
+		SendInternal(hdl);
+	}
+
+	// boo
+	void OnFail(websocketpp::connection_hdl hdl) {
+		client::connection_ptr con = c.get_con_from_hdl(hdl);
+		// TODO there is more error stuff to expose here if required
+		throw InvalidInputException("RPC request failed: %s", con->get_ec().message().c_str());
+	}
+
+	unique_ptr<ProtocolMessage> WaitForMessage() {
+		std::unique_lock<std::mutex> lock(messages_mutex);
+		messages_wait.wait(lock, [=] { return !messages.empty(); });
+		auto result(std::move(messages.back()));
+		messages.pop_back();
+		return result;
+	}
+
+	void SendInternal(websocketpp::connection_hdl hdl) {
+		if (!message) {
+			return;
+		}
+		auto write_stream = make_uniq<MemoryStream>(); // TODO pass allocator here
+		BinarySerializer serializer(*write_stream);
+		serializer.Begin();
+		message->Serialize(serializer);
+		serializer.End();
+
+		try {
+			c.send(hdl, write_stream->GetData(), write_stream->GetPosition(), websocketpp::frame::opcode::binary);
+		} catch (websocketpp::exception const &e) {
+			throw InvalidInputException(e.what());
+		}
+		message.reset();
+	}
+
+	void Schedule(unique_ptr<ProtocolMessage> message_p) {
+		message = std::move(message_p);
+	}
+
+	// TODO too much overlap with SendInternal
+	void Send(unique_ptr<ProtocolMessage> message_p) {
+		if (!message_p) {
+			return;
+		}
+		auto write_stream = make_uniq<MemoryStream>(); // TODO pass allocator here
+		BinarySerializer serializer(*write_stream);
+		serializer.Begin();
+		message_p->Serialize(serializer);
+		serializer.End();
+
+		try {
+			c.send(con, write_stream->GetData(), write_stream->GetPosition(), websocketpp::frame::opcode::binary);
+		} catch (websocketpp::exception const &e) {
+			throw InvalidInputException(e.what());
+		}
+	}
+
+	std::thread conn_thread;
+	unique_ptr<ProtocolMessage> message;
+	deque<unique_ptr<ProtocolMessage>> messages;
+	std::mutex messages_mutex;
+	std::condition_variable messages_wait;
+	string uri;
+	client c;
+	client::connection_ptr con;
+};
+
+struct RpcTableBindData : FunctionData {
+	explicit RpcTableBindData() {
+	}
+
+	unique_ptr<RpcClient> client;
+	string query;
+
+	bool Equals(const FunctionData &other_p) const override {
+		throw NotImplementedException("Equals not implemented");
+	}
+
+	unique_ptr<FunctionData> Copy() const override {
+		throw NotImplementedException("Copy not implemented");
+	}
+};
+
+static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
+                                                vector<LogicalType> &return_types, vector<string> &names) {
+
+	// Set logging to be pretty verbose (everything except message payloads)
+	auto uri = input.inputs[0].GetValue<string>();
+	auto query = input.inputs[1].GetValue<string>();
+	auto client = make_uniq<RpcClient>(uri);
+
+	auto bind_message = make_uniq<ProtocolMessage>();
+	bind_message->type = MessageType::BIND;
+	bind_message->query = query;
+
+	client->Schedule(std::move(bind_message));
+
+	auto bind_response = client->WaitForMessage();
+	if (bind_response->type != MessageType::BIND_RESULT) {
+		throw InvalidInputException("Expected bind result message");
+	}
+	return_types = bind_response->types;
+	names = bind_response->names;
+
+	auto res = make_uniq<RpcTableBindData>();
+	res->client = std::move(client);
+	res->query = query;
+
+	return res;
+}
+
+static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
+	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
+	auto &client = *bind_data.client;
+
+	auto execute_message = make_uniq<ProtocolMessage>();
+	execute_message->type = MessageType::EXECUTE;
+	execute_message->query = bind_data.query;
+
+	client.Send(std::move(execute_message));
+	auto execute_response = client.WaitForMessage();
+
+	output.Reference(*execute_response->data);
+	output.SetCardinality(execute_response->data->size());
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
 	// Register a scalar function
-	auto rpc_scalar_function = ScalarFunction("start_rpc_server", {}, LogicalType::VARCHAR, duckdb::RpcScalarFun);
+	auto rpc_scalar_function = ScalarFunction("start_rpc_server", {}, LogicalType::VARCHAR, RpcScalarFun);
 	loader.RegisterFunction(rpc_scalar_function);
 
-	auto rpc_table_function = TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                                        duckdb::RpcTableFun, duckdb::RpcTableBindFun);
+	auto rpc_table_function =
+	    TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcTableFun, RpcTableBindFun);
 	loader.RegisterFunction(rpc_table_function);
 }
 
@@ -336,6 +460,6 @@ std::string RpcExtension::Version() const {
 extern "C" {
 
 DUCKDB_CPP_EXTENSION_ENTRY(rpc, loader) {
-	duckdb::LoadInternal(loader);
+	LoadInternal(loader);
 }
 }
