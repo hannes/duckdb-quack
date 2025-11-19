@@ -90,7 +90,7 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 	switch (received_message->type) {
 	case MessageType::BIND: {
 		D_ASSERT(received_message->query.size() > 0);
-		printf("BIND %s\n", received_message->query.c_str());
+		// printf("BIND %s\n", received_message->query.c_str());
 
 		ProtocolMessage response_message;
 		response_message.type = MessageType::BIND_RESULT;
@@ -112,18 +112,56 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 		}
 		break;
 	}
+		// TODO this currently does not do a whole lot....
 	case MessageType::EXECUTE: {
 		D_ASSERT(received_message->query.size() > 0);
-		printf("EXECUTE %s\n", received_message->query.c_str());
+		// printf("EXECUTE %s\n", received_message->query.c_str());
 
 		ProtocolMessage response_message;
 		response_message.type = MessageType::EXECUTE_RESULT;
 
 		// TODO we need to cache this connection in the ws connection somehow
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		auto execute_result = internal_connection.Query(received_message->query);
+		query_result = internal_connection.Query(received_message->query);
 
-		response_message.data = execute_result->Fetch();
+		if (query_result->HasError()) {
+			response_message.type = MessageType::ERROR;
+			response_message.error = query_result->GetError();
+		}
+
+		//
+		// response_message.data = execute_result->Fetch();
+		auto write_message = response_message.ToMemoryStream();
+
+		try {
+			s.send(hdl, write_message->GetData(), write_message->GetPosition(), websocketpp::frame::opcode::binary);
+		} catch (websocketpp::exception const &e) {
+			// TODO we should not fail here but log something
+			std::cout << "bind reply failed because: "
+			          << "(" << e.what() << ")" << std::endl;
+		}
+		break;
+	}
+
+	case MessageType::FETCH: {
+		// printf("FETCH\n");
+
+		ProtocolMessage response_message;
+		response_message.type = MessageType::FETCH_RESULT;
+
+		// TODO we need to cache this connection in the ws connection somehow
+		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
+
+		response_message.data = query_result->Fetch();
+		if (!response_message.data || response_message.data->size() == 0) {
+			response_message.type = MessageType::FETCH_DONE;
+		}
+
+		if (query_result->HasError()) {
+			response_message.type = MessageType::ERROR;
+			response_message.error = query_result->GetError();
+		}
+
 		auto write_message = response_message.ToMemoryStream();
 
 		try {

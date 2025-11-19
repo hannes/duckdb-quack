@@ -44,6 +44,10 @@ struct RpcTableBindData : FunctionData {
 	}
 };
 
+// FIXME add some function data
+static bool did_execute = false;
+static bool done = false;
+
 static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
 
@@ -68,6 +72,7 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	auto res = make_uniq<RpcTableBindData>();
 	res->client = std::move(client);
 	res->query = query;
+	did_execute = false;
 
 	return res;
 }
@@ -76,18 +81,48 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
 	auto &client = *bind_data.client;
 
-	auto execute_message = make_uniq<ProtocolMessage>();
-	execute_message->type = MessageType::EXECUTE;
-	execute_message->query = bind_data.query;
+	// TODO only first time
 
-	client.Send(std::move(execute_message));
-	auto execute_response = client.WaitForMessage();
-	if (execute_response->type != MessageType::EXECUTE_RESULT) {
-		throw InvalidInputException("Expected bind result message");
+	if (!did_execute) {
+		auto execute_message = make_uniq<ProtocolMessage>();
+		execute_message->type = MessageType::EXECUTE;
+		execute_message->query = bind_data.query;
+		client.Send(std::move(execute_message));
+		auto execute_response = client.WaitForMessage();
+		if (execute_response->type == MessageType::ERROR) {
+			throw InvalidInputException(execute_response->error);
+		}
+		if (execute_response->type != MessageType::EXECUTE_RESULT) {
+			throw InvalidInputException(execute_response->error);
+		}
+		did_execute = true;
+		done = false;
 	}
 
-	output.Reference(*execute_response->data);
-	output.SetCardinality(execute_response->data->size());
+	if (!done) {
+		auto fetch_message = make_uniq<ProtocolMessage>();
+		// now we do the first fetch
+		fetch_message->type = MessageType::FETCH;
+		client.Send(std::move(fetch_message));
+		auto fetch_response = client.WaitForMessage();
+		if (fetch_response->type == MessageType::ERROR) {
+			throw InvalidInputException(fetch_response->error);
+		}
+
+		if (fetch_response->type == MessageType::FETCH_DONE) {
+			done = true;
+			return;
+		}
+		if (fetch_response->type != MessageType::FETCH_RESULT) {
+			throw InvalidInputException(fetch_response->error);
+		}
+
+		output.Reference(*fetch_response->data);
+		output.SetCardinality(fetch_response->data->size());
+		if (fetch_response->data->size() == 0) {
+			done = true;
+		}
+	}
 }
 
 static void LoadInternal(ExtensionLoader &loader) {

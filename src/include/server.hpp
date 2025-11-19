@@ -28,6 +28,9 @@ struct RpcServer {
 
 	// FIXME have one duckdb per ws connection!
 	Connection internal_connection;
+	unique_ptr<PendingQueryResult> pending_result;
+
+	unique_ptr<QueryResult> query_result;
 
 	server s;
 };

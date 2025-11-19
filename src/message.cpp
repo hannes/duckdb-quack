@@ -8,7 +8,7 @@ void ProtocolMessage::Serialize(Serializer &serializer) {
 	serializer.WriteProperty<string>(3, "error", error);
 	serializer.WriteProperty<vector<LogicalType>>(4, "types", types);
 	serializer.WriteProperty<vector<string>>(5, "names", names);
-	if (type == MessageType::EXECUTE_RESULT) {
+	if (type == MessageType::FETCH_RESULT) {
 		serializer.WriteObject(6, "data", [&](Serializer &serializer2) { data->Serialize(serializer2); });
 	}
 }
@@ -20,7 +20,7 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 	result->error = deserializer.ReadProperty<string>(3, "error");
 	result->types = deserializer.ReadProperty<vector<LogicalType>>(4, "types");
 	result->names = deserializer.ReadProperty<vector<string>>(5, "names");
-	if (result->type == MessageType::EXECUTE_RESULT) {
+	if (result->type == MessageType::FETCH_RESULT) {
 		result->data = make_uniq<DataChunk>();
 		deserializer.ReadObject(6, "data",
 		                        [&](Deserializer &deserializer2) { result->data->Deserialize(deserializer2); });
