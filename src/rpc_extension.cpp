@@ -90,8 +90,6 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
 	auto &client = *bind_data.client;
 
-	// TODO only first time
-
 	if (!did_execute) {
 		auto execute_message = make_uniq<ProtocolMessage>();
 		execute_message->type = MessageType::EXECUTE;
@@ -104,30 +102,34 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 		if (execute_response->type != MessageType::EXECUTE_RESULT) {
 			throw InvalidInputException(execute_response->error);
 		}
+		auto fetch_message = make_uniq<ProtocolMessage>();
+		// now we do the first fetch
+		fetch_message->type = MessageType::FETCH;
+		client.Send(std::move(fetch_message));
+
 		did_execute = true;
 		done = false;
 	}
 
 	if (!done) {
-		auto fetch_message = make_uniq<ProtocolMessage>();
-		// now we do the first fetch
-		fetch_message->type = MessageType::FETCH;
-		client.Send(std::move(fetch_message));
-		auto fetch_response = client.WaitForMessage();
-		if (fetch_response->type == MessageType::ERROR) {
-			throw InvalidInputException(fetch_response->error);
-		}
+		// printf("GetData()\n");
 
-		if (fetch_response->type == MessageType::FETCH_DONE) {
+		// auto fetch_message = make_uniq<ProtocolMessage>();
+		// // now we do the first fetch
+		// fetch_message->type = MessageType::FETCH;
+		// client.Send(std::move(fetch_message));
+		auto fetch_response = client.WaitForMessage();
+		if (fetch_response->type != MessageType::FETCH_RESULT) {
 			done = true;
 			return;
 		}
-		if (fetch_response->type != MessageType::FETCH_RESULT) {
+		if (fetch_response->type == MessageType::ERROR) {
 			throw InvalidInputException(fetch_response->error);
 		}
 
 		output.Reference(*fetch_response->data);
 		output.SetCardinality(fetch_response->data->size());
+		// printf("%llu", fetch_response->data->size());
 		if (fetch_response->data->size() == 0) {
 			done = true;
 		}

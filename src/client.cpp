@@ -65,7 +65,7 @@ void RpcClient::OnOpen(websocketpp::connection_hdl hdl) {
 
 void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
-	// printf("REC %d\n", received_message->type);
+	//	printf("REC %d\n", received_message->type);
 	std::unique_lock<std::mutex> lock(messages_mutex);
 	messages.push_front(std::move(received_message));
 	messages_wait.notify_one();
