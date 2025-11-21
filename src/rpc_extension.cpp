@@ -23,9 +23,17 @@ using websocketpp::lib::placeholders::_2;
 
 namespace duckdb {
 
+static unique_ptr<RpcServer> rpc_server; // TODO evil global
+
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
-	RpcServer rcp_server(state.GetContext()); // TODO start this in a background thread and don't block the rest
-	rcp_server.Listen(4242);
+	D_ASSERT(args.AllConstant());
+	auto port = args.GetValue(0, 0).GetValue<uint32_t>();
+	if (rpc_server) {
+		return;
+	}
+	rpc_server = make_uniq<RpcServer>(state.GetContext());
+	rpc_server->Listen(port);
+	result.SetValue(0, StringUtil::Format("Listening on port %d", port));
 }
 
 struct RpcTableBindData : FunctionData {
@@ -127,7 +135,9 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 
 static void LoadInternal(ExtensionLoader &loader) {
 	// Register a scalar function
-	auto rpc_scalar_function = ScalarFunction("start_rpc_server", {}, LogicalType::VARCHAR, RpcScalarFun);
+	auto rpc_scalar_function =
+	    ScalarFunction("start_rpc_server", {LogicalType::UINTEGER}, LogicalType::VARCHAR, RpcScalarFun);
+	rpc_scalar_function.stability = FunctionStability::VOLATILE;
 	loader.RegisterFunction(rpc_scalar_function);
 
 	auto rpc_table_function =

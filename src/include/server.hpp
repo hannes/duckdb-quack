@@ -20,7 +20,7 @@ class ClientContext;
 struct RpcServer {
 	RpcServer(ClientContext &context_p);
 
-	void Listen(int port);
+	void Listen(uint32_t port);
 
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
 
@@ -31,7 +31,7 @@ struct RpcServer {
 	unique_ptr<PendingQueryResult> pending_result;
 
 	unique_ptr<QueryResult> query_result;
-
+	std::thread listen_thread;
 	server s;
 };
 } // namespace duckdb

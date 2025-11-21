@@ -2,22 +2,21 @@
 # description: test rpc extension
 # group: [sql]
 
-# Before we load the extension, this will fail
-statement error
-SELECT rpc('Sam');
-----
-Catalog Error: Scalar Function with name rpc does not exist!
-
 # Require statement will ensure this test is run with this extension loaded
 require rpc
 
-# Confirm the extension works
-query I
-SELECT rpc('Sam');
-----
-Rpc Sam 🐥
+statement ok con1
+select start_rpc_server(4242);
 
-query I
-SELECT rpc_openssl_version('Michael') ILIKE 'Rpc Michael, my linked OpenSSL version is OpenSSL%';
+query I con2
+from call_rpc_server('wss://localhost:4242', 'select 42')
 ----
-true
+42
+
+query I con2
+from call_rpc_server('wss://localhost:4242', 'select max(range) from range(10000)')
+----
+9999
+
+statement ok con2
+from call_rpc_server('wss://localhost:4242', 'from test_all_types()')

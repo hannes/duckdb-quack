@@ -75,11 +75,22 @@ RpcServer::RpcServer(ClientContext &context_p) : context(context_p), internal_co
 	s.init_asio();
 }
 
-void RpcServer::Listen(int port) {
+static void ListenThread(void *rpc_server_p) {
+	auto rpc_server = (RpcServer *)rpc_server_p;
+	D_ASSERT(rpc_server);
+
+	rpc_server->s.start_accept();
+	rpc_server->s.run();
+}
+
+void RpcServer::Listen(uint32_t port) {
 	s.listen(port);
-	s.start_accept();
-	printf("Listening on port %d\n", port);
-	s.run();
+
+	// TODO make this cancellable
+	listen_thread = std::thread([=]() {
+		ListenThread(this);
+		return 1;
+	});
 }
 
 // main switcheroo happens here
