@@ -14,8 +14,10 @@ typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
 
+enum Mode { WEB_SOCKET, UNIX_SOCKET };
+
 struct RpcClient {
-	RpcClient(string &uri_p);
+	RpcClient(string &uri_p, Mode mode_p);
 
 	~RpcClient();
 
@@ -36,5 +38,7 @@ struct RpcClient {
 	string uri;
 	client c;
 	client::connection_ptr con;
+	Mode mode;
+	int unix_socket;
 };
 } // namespace duckdb

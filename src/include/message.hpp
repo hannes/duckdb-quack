@@ -19,7 +19,6 @@ enum class MessageType : uint8_t {
 };
 
 struct ProtocolMessage {
-
 	void ToMemoryStream(MemoryStream &write_stream);
 	static unique_ptr<ProtocolMessage> FromPayload(std::string const &payload);
 

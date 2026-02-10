@@ -6,7 +6,6 @@
 
 using namespace duckdb;
 
-using websocketpp::lib::bind;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
@@ -83,6 +82,75 @@ static void ListenThread(void *rpc_server_p) {
 	rpc_server->s.run();
 }
 
+static void ListenUnixSocketThread(void *rpc_server_p) {
+	auto rpc_server = (RpcServer *)rpc_server_p;
+	struct sockaddr_un local;
+
+	auto socket_path = "/tmp/duckdb-rpc-socket";
+
+	auto s = socket(AF_UNIX, SOCK_STREAM, 0);
+	local.sun_family = AF_UNIX;
+
+	memset(&local, 0, sizeof(struct sockaddr_un));
+
+	strcpy(local.sun_path, socket_path);
+	// TODO check errors on this one
+	unlink(local.sun_path);
+	auto len = SUN_LEN(&local);
+	if (bind(s, (struct sockaddr *)&local, len)) {
+		throw std::runtime_error("Error on binding socket \n");
+	}
+
+	if (listen(s, 42 /* TODO: magic constant */)) {
+		throw std::runtime_error("Error on listen call \n");
+	}
+
+	printf("Listening on %s\n", local.sun_path);
+
+	while (true) {
+		int client_socket_fd = 0;
+
+		unsigned int sock_len = 0;
+		if ((client_socket_fd = accept(s, (struct sockaddr *)&local, &sock_len)) == -1) {
+			continue;
+		}
+
+		// TODO fork off thread
+		std::string message_data;
+
+		int data_recv = 0;
+		do {
+			idx_t msg_len;
+			data_recv = recv(client_socket_fd, &msg_len, sizeof(idx_t), 0);
+			if (data_recv != sizeof(idx_t)) {
+				printf("Error on recv() call 1\n");
+				break; // TODO we probably want to close the connection in this case
+			}
+			message_data.resize(msg_len);
+
+			data_recv = recv(client_socket_fd, (void *)message_data.data(), msg_len, 0);
+			if (data_recv != msg_len) {
+				printf("Error on recv() call 2\n");
+
+				break; // TODO we probably want to close the connection in this case
+			}
+			auto received_message = ProtocolMessage::FromPayload(message_data);
+			rpc_server->HandleMessage(*received_message, [&](ProtocolMessage &response_message) -> void {
+				response_message.ToMemoryStream(rpc_server->write_stream);
+				idx_t msg_len = rpc_server->write_stream.GetPosition();
+				if (send(client_socket_fd, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
+					printf("Error 1 on send() call %s \n", strerror(errno));
+				}
+				if (send(client_socket_fd, rpc_server->write_stream.GetData(), msg_len, 0) != msg_len) {
+					printf("Error 2 on send() call %s \n", strerror(errno));
+				}
+			});
+
+		} while (data_recv > 0); // TODO this is blocking right?
+		                         // close(client_socket_fd);
+	}
+}
+
 void RpcServer::Listen(uint32_t port) {
 	s.listen(port);
 
@@ -91,95 +159,67 @@ void RpcServer::Listen(uint32_t port) {
 		ListenThread(this);
 		return 1;
 	});
+
+	// TODO make this cancellable
+	unix_socket_thread = std::thread([=]() {
+		ListenUnixSocketThread(this);
+		return 1;
+	});
 }
 
 // main switcheroo happens here
-void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
+void RpcServer::HandleMessage(ProtocolMessage &received_message, std::function<void(ProtocolMessage &)> send_fun) {
+	auto response_message = make_uniq<ProtocolMessage>();
 
-	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
-
-	switch (received_message->type) {
+	switch (received_message.type) {
 	case MessageType::BIND: {
-		D_ASSERT(received_message->query.size() > 0);
-		// printf("BIND %s\n", received_message->query.c_str());
+		D_ASSERT(received_message.query.size() > 0);
+		printf("BIND %s\n", received_message.query.c_str());
 
-		ProtocolMessage response_message;
-		response_message.type = MessageType::BIND_RESULT;
+		response_message->type = MessageType::BIND_RESULT;
 
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		auto prepare_result = internal_connection.Prepare(received_message->query);
+		auto prepare_result = internal_connection.Prepare(received_message.query);
 		if (prepare_result->HasError()) {
-			response_message.type = MessageType::ERROR;
-			response_message.error = prepare_result->GetError();
+			response_message->type = MessageType::ERROR;
+			response_message->error = prepare_result->GetError();
 		} else {
-			response_message.types = prepare_result->GetTypes();
-			response_message.names = prepare_result->GetNames();
+			response_message->types = prepare_result->GetTypes();
+			response_message->names = prepare_result->GetNames();
 		}
-		response_message.ToMemoryStream(write_stream);
-		try {
-			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-		} catch (websocketpp::exception const &e) {
-			// TODO we should not fail here but log something
-			std::cout << "bind reply failed because: "
-			          << "(" << e.what() << ")" << std::endl;
-		}
+		send_fun(*response_message);
 		break;
 	}
 		// TODO this currently does not do a whole lot....
 	case MessageType::EXECUTE: {
-		D_ASSERT(received_message->query.size() > 0);
-		// printf("EXECUTE %s\n", received_message->query.c_str());
+		D_ASSERT(received_message.query.size() > 0);
+		printf("EXECUTE %s\n", received_message.query.c_str());
 
-		ProtocolMessage response_message;
-		response_message.type = MessageType::EXECUTE_RESULT;
+		response_message->type = MessageType::EXECUTE_RESULT;
 
 		// TODO we need to cache this connection in the ws connection somehow
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		query_result = internal_connection.PendingQuery(received_message->query, true)->Execute();
+		query_result = internal_connection.PendingQuery(received_message.query, true)->Execute();
 
 		if (query_result->HasError()) {
-			response_message.type = MessageType::ERROR;
-			response_message.error = query_result->GetError();
+			response_message->type = MessageType::ERROR;
+			response_message->error = query_result->GetError();
 		}
-
-		//
-		// response_message.data = execute_result->Fetch();
-		response_message.ToMemoryStream(write_stream);
-
-		try {
-			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-		} catch (websocketpp::exception const &e) {
-			// TODO we should not fail here but log something
-			std::cout << "bind reply failed because: "
-			          << "(" << e.what() << ")" << std::endl;
-		}
+		send_fun(*response_message);
 		break;
 	}
 
 	case MessageType::FETCH: {
-		// printf("FETCH\n");
+		printf("FETCH\n");
 
-		ProtocolMessage response_message;
-		response_message.type = MessageType::FETCH_RESULT;
-
-		// TODO we need to cache this connection in the ws connection somehow
-		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
+		response_message->type = MessageType::FETCH_RESULT;
 
 		while (true) {
-			response_message.data = query_result->Fetch();
-			if (!response_message.data || response_message.data->size() == 0) {
-				response_message.type = MessageType::FETCH_DONE;
+			response_message->data = query_result->Fetch();
+			if (!response_message->data || response_message->data->size() == 0) {
+				response_message->type = MessageType::FETCH_DONE;
 
-				response_message.ToMemoryStream(write_stream);
-				// cough
-				try {
-					s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-				} catch (websocketpp::exception const &e) {
-					// TODO we should not fail here but log something
-					std::cout << "bind reply failed because: "
-					          << "(" << e.what() << ")" << std::endl;
-				}
-
+				send_fun(*response_message);
 				break;
 			}
 			// if (!response_message.data || response_message.data->size() == 0) {
@@ -187,26 +227,31 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 			// }
 
 			if (query_result->HasError()) {
-				response_message.type = MessageType::ERROR;
-				response_message.error = query_result->GetError();
+				response_message->type = MessageType::ERROR;
+				response_message->error = query_result->GetError();
 			}
-
-			response_message.ToMemoryStream(write_stream);
-
-			try {
-				s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-			} catch (websocketpp::exception const &e) {
-				// TODO we should not fail here but log something
-				std::cout << "bind reply failed because: "
-				          << "(" << e.what() << ")" << std::endl;
-			}
+			// FIXME send column data collection
+			send_fun(*response_message);
 		}
 		break;
 	}
 	default: {
-		printf("eeek!\n");
-		// TODO complain, but do not exit
-		break;
+		throw NotImplementedException("Unimplemented message type");
 	}
 	}
+}
+
+void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
+	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
+
+	HandleMessage(*received_message, [&](ProtocolMessage &response_message) -> void {
+		response_message.ToMemoryStream(write_stream);
+		try {
+			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+		} catch (websocketpp::exception const &e) {
+			// TODO we should not fail here but log something
+			std::cout << "bind reply failed because: "
+			          << "(" << e.what() << ")" << std::endl;
+		}
+	});
 }

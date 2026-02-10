@@ -58,19 +58,18 @@ static bool done = false;
 
 static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
-
 	// Set logging to be pretty verbose (everything except message payloads)
 	auto uri = input.inputs[0].GetValue<string>();
 	auto query = input.inputs[1].GetValue<string>();
-	auto client = make_uniq<RpcClient>(uri);
+	auto client = make_uniq<RpcClient>(uri, Mode::UNIX_SOCKET);
 
 	auto bind_message = make_uniq<ProtocolMessage>();
 	bind_message->type = MessageType::BIND;
 	bind_message->query = query;
 
 	client->Schedule(std::move(bind_message));
-
 	auto bind_response = client->WaitForMessage();
+
 	if (bind_response->type != MessageType::BIND_RESULT) {
 		throw InvalidInputException("Expected bind result message, got error instead: %s",
 		                            bind_response->error.c_str());

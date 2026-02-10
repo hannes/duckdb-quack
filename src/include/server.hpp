@@ -17,6 +17,7 @@ typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> conte
 enum tls_mode { MOZILLA_INTERMEDIATE = 1, MOZILLA_MODERN = 2 };
 
 class ClientContext;
+class ProtocolMessage;
 
 struct RpcServer {
 	RpcServer(ClientContext &context_p);
@@ -24,6 +25,7 @@ struct RpcServer {
 	void Listen(uint32_t port);
 
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
+	void HandleMessage(ProtocolMessage &received_message, std::function<void(ProtocolMessage &)> send_fun);
 
 	ClientContext &context;
 
@@ -31,6 +33,8 @@ struct RpcServer {
 	Connection internal_connection;
 	unique_ptr<QueryResult> query_result;
 	std::thread listen_thread;
+	std::thread unix_socket_thread;
+
 	server s;
 	//	FIXME this should probably also exist per-connection!
 	MemoryStream write_stream;

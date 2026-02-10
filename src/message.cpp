@@ -2,7 +2,6 @@
 using namespace duckdb;
 
 void ProtocolMessage::Serialize(Serializer &serializer) {
-
 	serializer.WriteProperty<uint8_t>(1, "type", static_cast<uint8_t>(type));
 	serializer.WriteProperty<string>(2, "query", query);
 	serializer.WriteProperty<string>(3, "error", error);
@@ -31,7 +30,7 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) {
 	write_stream.Rewind();
 	SerializationOptions options;
-	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
+	options.serialization_compatibility = SerializationCompatibility::FromIndex(6);
 	BinarySerializer serializer(write_stream, options);
 
 	serializer.Begin();
