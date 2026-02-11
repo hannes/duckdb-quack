@@ -27,7 +27,7 @@ static void ConnectionThread(void *rpc_client_p) {
 	websocketpp::lib::error_code ec;
 	rpc_client->con = rpc_client->c.get_connection(rpc_client->uri, ec);
 	if (ec) {
-		throw InternalException(ec.message());
+		throw IOException(ec.message());
 	}
 	// actually listen and run event loop
 	rpc_client->c.connect(rpc_client->con);
@@ -58,14 +58,14 @@ RpcClient::RpcClient(string &uri_p, Mode mode_p) : uri(uri_p), mode(mode_p) {
 		memset(&remote, 0, sizeof(struct sockaddr_un));
 
 		if ((unix_socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
-			throw InternalException("Client: Error on socket() call %s", strerror(errno));
+			throw IOException("Client: Error on socket() call %s", strerror(errno));
 		}
 		remote.sun_family = AF_UNIX;
 		strcpy(remote.sun_path, uri.c_str());
 		auto data_len = SUN_LEN(&remote);
 
 		if (connect(unix_socket, (struct sockaddr *)&remote, data_len)) {
-			throw InternalException("Client: Error on connect(%s) call: %s", (char *)remote.sun_path, strerror(errno));
+			throw IOException("Client: Error on connect(%s) call: %s", (char *)remote.sun_path, strerror(errno));
 		}
 	}
 }
@@ -113,21 +113,7 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessage(MessageType expected_type)
 		messages.pop_back();
 	}
 	if (mode == UNIX_SOCKET) {
-		MemoryStream read_stream;
-
-		int data_recv = 0;
-		idx_t msg_len;
-		data_recv = recv(unix_socket, &msg_len, sizeof(idx_t), MSG_WAITALL);
-		if (data_recv != sizeof(idx_t)) {
-			throw InternalException("Receive error 1 %llu %lld %s", msg_len, data_recv, strerror(errno));
-		}
-		read_stream.GrowCapacity(msg_len);
-
-		data_recv = recv(unix_socket, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
-		if (data_recv != msg_len) {
-			throw InternalException("Receive error 2 %llu %lld %s", msg_len, data_recv, strerror(errno));
-		}
-		result = ProtocolMessage::FromMemoryStream(read_stream);
+		result = ProtocolMessage::FromSocket(unix_socket);
 	}
 
 	if (result->Type() != expected_type) {
@@ -139,7 +125,6 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessage(MessageType expected_type)
 		throw InvalidInputException("Expected %s message, got %s instead", MessageTypeToString(expected_type),
 		                            MessageTypeToString(result->Type()));
 	}
-
 	return result;
 }
 
@@ -153,7 +138,7 @@ void RpcClient::SendInternal(websocketpp::connection_hdl hdl) {
 	try {
 		c.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 	} catch (websocketpp::exception const &e) {
-		throw InvalidInputException(e.what());
+		throw IOException(e.what());
 	}
 
 	message.reset();
@@ -170,27 +155,19 @@ void RpcClient::Schedule(unique_ptr<ProtocolMessage> message_p) {
 
 // TODO too much overlap with SendInternal
 void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
-	MemoryStream write_stream;
-	message_p->ToMemoryStream(write_stream);
 	if (mode == WEB_SOCKET) {
 		if (!message_p) {
 			return;
 		}
-
 		try {
+			MemoryStream write_stream;
+			message_p->ToMemoryStream(write_stream);
 			c.send(con, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
-			throw InvalidInputException(e.what());
+			throw IOException(e.what());
 		}
 	}
 	if (mode == UNIX_SOCKET) {
-		idx_t msg_len = write_stream.GetPosition();
-
-		if (send(unix_socket, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
-			throw std::runtime_error("Send error 1");
-		}
-		if (send(unix_socket, write_stream.GetData(), msg_len, 0) != msg_len) {
-			throw std::runtime_error("Send error 2");
-		}
+		message_p->ToSocket(unix_socket);
 	}
 }

@@ -116,41 +116,19 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 		}
 
 		// TODO fork off thread
-
-		MemoryStream read_stream;
-
-		// TODO this is duplicated in client!!
-
-		int data_recv = 0;
+		bool open = true;
 		do {
-			idx_t msg_len;
-			data_recv = recv(client_socket_fd, &msg_len, sizeof(idx_t), MSG_WAITALL);
-			if (data_recv != sizeof(idx_t)) {
-				printf("Error on recv() call 1\n");
-				break; // TODO we probably want to close the connection in this case
+			try {
+				auto received_message = ProtocolMessage::FromSocket(client_socket_fd);
+				rpc_server->HandleMessage(*received_message, [&](unique_ptr<ProtocolMessage> response_message) -> void {
+					response_message->ToSocket(client_socket_fd);
+				});
+			} catch (IOException e) {
+				open = false;
 			}
-			read_stream.GrowCapacity(msg_len);
 
-			data_recv = recv(client_socket_fd, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
-			if (data_recv != msg_len) {
-				printf("Error on recv() call 2\n");
-
-				break; // TODO we probably want to close the connection in this case
-			}
-			auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
-			rpc_server->HandleMessage(*received_message, [&](unique_ptr<ProtocolMessage> response_message) -> void {
-				response_message->ToMemoryStream(rpc_server->write_stream);
-				idx_t msg_len = rpc_server->write_stream.GetPosition();
-				if (send(client_socket_fd, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
-					printf("Error 1 on send() call %s \n", strerror(errno));
-				}
-				if (send(client_socket_fd, rpc_server->write_stream.GetData(), msg_len, 0) != msg_len) {
-					printf("Error 2 on send() call %s \n", strerror(errno));
-				}
-			});
-
-		} while (data_recv > 0); // TODO this is blocking right?
-		                         // close(client_socket_fd);
+		} while (open);
+		close(client_socket_fd);
 	}
 }
 
@@ -178,24 +156,18 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message,
 		auto bind_request_message = received_message.Cast<BindRequestMessage>();
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		auto prepare_result = internal_connection.Prepare(bind_request_message.Query());
-		unique_ptr<ProtocolMessage> response_message;
 		if (prepare_result->HasError()) {
-			response_message = make_uniq<ErrorMessage>(prepare_result->GetError());
-		} else {
-			response_message = make_uniq<BindResponseMessage>(prepare_result->GetTypes(), prepare_result->GetNames());
+			send_fun(make_uniq<ErrorMessage>(prepare_result->GetError()));
+			return;
 		}
-		send_fun(std::move(response_message));
+		send_fun(make_uniq<BindResponseMessage>(prepare_result->GetTypes(), prepare_result->GetNames()));
 		return;
 	}
-		// TODO this currently does not do a whole lot....
 	case MessageType::EXECUTE_REQUEST: {
 		auto execute_request_message = received_message.Cast<ExecuteRequestMessage>();
-
 		// TODO we need to cache this connection in the ws connection somehow
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		query_result = internal_connection.PendingQuery(execute_request_message.Query(), true)->Execute();
-		unique_ptr<ProtocolMessage> response_message;
-
 		if (query_result->HasError()) {
 			send_fun(make_uniq<ErrorMessage>(query_result->GetError()));
 			return;
@@ -208,21 +180,17 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message,
 	case MessageType::FETCH_REQUEST: {
 		while (true) { // FIXME this just dumps the results on the client without asking for speed
 			auto result_chunk = query_result->Fetch();
-			unique_ptr<ProtocolMessage> response_message;
 
 			if (query_result->HasError()) {
-				send_fun(std::move(make_uniq<ErrorMessage>(query_result->GetError())));
+				send_fun(make_uniq<ErrorMessage>(query_result->GetError()));
 				return;
-			} else {
-				if (!result_chunk || result_chunk->size() == 0) {
-					send_fun(std::move(make_uniq<FetchDoneMessage>()));
-					return;
-				} else {
-					response_message = make_uniq<FetchResponseMessage>(std::move(result_chunk));
-				}
 			}
-			// FIXME send column data collection
-			send_fun(std::move(response_message));
+			if (!result_chunk || result_chunk->size() == 0) {
+				send_fun(make_uniq<FetchResponseMessage>(nullptr));
+				return;
+			}
+			// FIXME send column data collection instead?
+			send_fun(make_uniq<FetchResponseMessage>(std::move(result_chunk)));
 		}
 		return;
 	}

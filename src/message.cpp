@@ -1,4 +1,6 @@
 #include "message.hpp"
+#include <sys/socket.h>
+
 using namespace duckdb;
 
 string duckdb::MessageTypeToString(MessageType type) {
@@ -15,8 +17,6 @@ string duckdb::MessageTypeToString(MessageType type) {
 		return "FETCH_REQUEST";
 	case MessageType::FETCH_RESPONSE:
 		return "FETCH_RESPONSE";
-	case MessageType::FETCH_DONE:
-		return "FETCH_DONE";
 	case MessageType::ERROR:
 		return "ERROR";
 	case MessageType::INVALID:
@@ -37,8 +37,38 @@ void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) const {
 }
 
 unique_ptr<ProtocolMessage> ProtocolMessage::FromMemoryStream(MemoryStream &read_stream) {
+	read_stream.Rewind();
 	BinaryDeserializer deserializer(read_stream);
 	return Deserialize(deserializer);
+}
+
+unique_ptr<ProtocolMessage> ProtocolMessage::FromSocket(int fd) {
+	idx_t msg_len;
+	MemoryStream read_stream;
+	auto data_recv_header = recv(fd, &msg_len, sizeof(idx_t), MSG_WAITALL);
+	if (data_recv_header != sizeof(idx_t)) {
+		throw IOException("Failed to receive message length: %s", strerror(errno));
+	}
+	read_stream.GrowCapacity(msg_len);
+
+	auto data_recv_message = recv(fd, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
+	if (data_recv_message != msg_len) {
+		throw IOException("Failed to receive message body (length %llu): %s", msg_len, strerror(errno));
+	}
+	return FromMemoryStream(read_stream);
+}
+
+void ProtocolMessage::ToSocket(int fd) const {
+	MemoryStream write_stream;
+	ToMemoryStream(write_stream);
+
+	idx_t msg_len = write_stream.GetPosition();
+	if (send(fd, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
+		throw IOException("Failed to send message length (%llu): %s", msg_len, strerror(errno));
+	}
+	if (send(fd, write_stream.GetData(), msg_len, 0) != msg_len) {
+		throw IOException("Failed to send message body (length %llu): %s", msg_len, strerror(errno));
+	}
 }
 
 void ProtocolMessage::Serialize(Serializer &serializer) const {
@@ -68,9 +98,6 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 		break;
 	case MessageType::FETCH_RESPONSE:
 		result = FetchResponseMessage::Deserialize(deserializer);
-		break;
-	case MessageType::FETCH_DONE:
-		result = FetchDoneMessage::Deserialize(deserializer);
 		break;
 	case MessageType::ERROR:
 		result = ErrorMessage::Deserialize(deserializer);
@@ -136,24 +163,24 @@ unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deser
 
 void FetchResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
-	serializer.WriteObject(250, "response_data",
-	                       [&](Serializer &inner_serializer) { response_data->Serialize(inner_serializer); });
+	auto response_data_present = response_data && response_data->size() > 0;
+	serializer.WriteProperty<bool>(250, "response_data_present", response_data_present);
+	if (response_data_present) {
+		serializer.WriteObject(251, "response_data",
+		                       [&](Serializer &inner_serializer) { response_data->Serialize(inner_serializer); });
+	}
 }
 
 unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto response_data_present = deserializer.ReadProperty<bool>(250, "response_data_present");
+	if (!response_data_present) {
+		return make_uniq<FetchResponseMessage>(nullptr);
+	}
+
 	auto result_chunk = make_uniq<DataChunk>();
-	deserializer.ReadObject(250, "response_data",
+	deserializer.ReadObject(251, "response_data",
 	                        [&](Deserializer &inner_deserializer) { result_chunk->Deserialize(inner_deserializer); });
 	return make_uniq<FetchResponseMessage>(std::move(result_chunk));
-}
-
-void FetchDoneMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
-	// 240
-}
-
-unique_ptr<ProtocolMessage> FetchDoneMessage::Deserialize(Deserializer &deserializer) {
-	return make_uniq<FetchDoneMessage>();
 }
 
 void ErrorMessage::Serialize(Serializer &serializer) const {

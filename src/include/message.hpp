@@ -14,7 +14,6 @@ enum class MessageType : uint8_t {
 	EXECUTE_RESPONSE = 4,
 	FETCH_REQUEST = 5,
 	FETCH_RESPONSE = 6,
-	FETCH_DONE = 7,
 	ERROR = 100
 };
 
@@ -24,6 +23,10 @@ class ProtocolMessage {
 public:
 	void ToMemoryStream(MemoryStream &write_stream) const;
 	static unique_ptr<ProtocolMessage> FromMemoryStream(MemoryStream &read_stream);
+
+	void ToSocket(int fd) const;
+
+	static unique_ptr<ProtocolMessage> FromSocket(int fd);
 
 	template <class TARGET>
 	TARGET &Cast() {
@@ -88,8 +91,8 @@ public:
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
 private:
-	vector<string> result_names;
 	vector<LogicalType> result_types;
+	vector<string> result_names;
 };
 
 class ExecuteRequestMessage : public ProtocolMessage {
@@ -137,22 +140,13 @@ public:
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-	DataChunk &ResponseData() {
-		return *response_data;
+	optional_ptr<DataChunk> ResponseData() {
+		return response_data.get();
 	}
 
 private:
 	unique_ptr<DataChunk> response_data;
 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
-};
-
-// FIXME this one needs to go
-class FetchDoneMessage : public ProtocolMessage {
-public:
-	static constexpr const MessageType TYPE = MessageType::FETCH_DONE;
-	FetchDoneMessage() : ProtocolMessage(TYPE) {};
-	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 };
 
 class ErrorMessage : public ProtocolMessage {

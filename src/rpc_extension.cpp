@@ -83,22 +83,21 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 	auto &client = *bind_data.client;
 
 	if (!did_execute) {
-		client.Send(std::move(make_uniq<ExecuteRequestMessage>(bind_data.query)));
+		client.Send(make_uniq<ExecuteRequestMessage>(bind_data.query));
 		// TODO we don't do anything with this>
 		client.WaitForMessageType<ExecuteResponseMessage>();
 		// now we do the first fetch
-		client.Send(std::move(make_uniq<FetchRequestMessage>()));
+		client.Send(make_uniq<FetchRequestMessage>());
 		did_execute = true;
 		done = false;
 	}
 
 	if (!done) {
 		auto fetch_response = client.WaitForMessageType<FetchResponseMessage>();
-
-		output.Reference(fetch_response->ResponseData());
-		output.SetCardinality(fetch_response->ResponseData().size());
-		// printf("%llu", fetch_response->data->size());
-		if (fetch_response->ResponseData().size() == 0) {
+		if (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
+			output.Reference(*fetch_response->ResponseData());
+			output.SetCardinality(fetch_response->ResponseData()->size());
+		} else {
 			done = true;
 		}
 	}
