@@ -138,8 +138,8 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 				break; // TODO we probably want to close the connection in this case
 			}
 			auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
-			rpc_server->HandleMessage(*received_message, [&](ProtocolMessage &response_message) -> void {
-				response_message.ToMemoryStream(rpc_server->write_stream);
+			rpc_server->HandleMessage(*received_message, [&](unique_ptr<ProtocolMessage> response_message) -> void {
+				response_message->ToMemoryStream(rpc_server->write_stream);
 				idx_t msg_len = rpc_server->write_stream.GetPosition();
 				if (send(client_socket_fd, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
 					printf("Error 1 on send() call %s \n", strerror(errno));
@@ -171,11 +171,11 @@ void RpcServer::Listen(uint32_t port) {
 }
 
 // main switcheroo happens here
-void RpcServer::HandleMessage(ProtocolMessage &received_message, std::function<void(ProtocolMessage &)> send_fun) {
+void RpcServer::HandleMessage(ProtocolMessage &received_message,
+                              std::function<void(unique_ptr<ProtocolMessage>)> send_fun) {
 	switch (received_message.Type()) {
 	case MessageType::BIND_REQUEST: {
 		auto bind_request_message = received_message.Cast<BindRequestMessage>();
-		printf("BIND %s\n", bind_request_message.Query().c_str());
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
 		auto prepare_result = internal_connection.Prepare(bind_request_message.Query());
 		unique_ptr<ProtocolMessage> response_message;
@@ -184,13 +184,12 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message, std::function<v
 		} else {
 			response_message = make_uniq<BindResponseMessage>(prepare_result->GetTypes(), prepare_result->GetNames());
 		}
-		send_fun(*response_message);
+		send_fun(std::move(response_message));
 		return;
 	}
 		// TODO this currently does not do a whole lot....
 	case MessageType::EXECUTE_REQUEST: {
 		auto execute_request_message = received_message.Cast<ExecuteRequestMessage>();
-		printf("EXECUTE %s\n", execute_request_message.Query().c_str());
 
 		// TODO we need to cache this connection in the ws connection somehow
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
@@ -198,37 +197,32 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message, std::function<v
 		unique_ptr<ProtocolMessage> response_message;
 
 		if (query_result->HasError()) {
-			response_message = make_uniq<ErrorMessage>(query_result->GetError());
-		} else {
-			response_message = make_uniq<ExecuteResponseMessage>();
-			// TODO add a query handle here
+			send_fun(make_uniq<ErrorMessage>(query_result->GetError()));
+			return;
 		}
-		send_fun(*response_message);
+		// TODO add a query handle here
+		send_fun(make_uniq<ExecuteResponseMessage>());
 		return;
 	}
 
 	case MessageType::FETCH_REQUEST: {
-		printf("FETCH\n");
-
 		while (true) { // FIXME this just dumps the results on the client without asking for speed
 			auto result_chunk = query_result->Fetch();
 			unique_ptr<ProtocolMessage> response_message;
 
 			if (query_result->HasError()) {
-				response_message = make_uniq<ErrorMessage>(query_result->GetError());
-				send_fun(*response_message);
+				send_fun(std::move(make_uniq<ErrorMessage>(query_result->GetError())));
 				return;
 			} else {
 				if (!result_chunk || result_chunk->size() == 0) {
-					response_message = make_uniq<FetchDoneMessage>();
-					send_fun(*response_message);
+					send_fun(std::move(make_uniq<FetchDoneMessage>()));
 					return;
 				} else {
 					response_message = make_uniq<FetchResponseMessage>(std::move(result_chunk));
 				}
 			}
 			// FIXME send column data collection
-			send_fun(*response_message);
+			send_fun(std::move(response_message));
 		}
 		return;
 	}
@@ -243,8 +237,8 @@ void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 
 	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 
-	HandleMessage(*received_message, [&](ProtocolMessage &response_message) -> void {
-		response_message.ToMemoryStream(write_stream);
+	HandleMessage(*received_message, [&](unique_ptr<ProtocolMessage> response_message) -> void {
+		response_message->ToMemoryStream(write_stream);
 		try {
 			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
