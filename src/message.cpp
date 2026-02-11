@@ -1,33 +1,31 @@
 #include "message.hpp"
 using namespace duckdb;
 
-void ProtocolMessage::Serialize(Serializer &serializer) {
-	serializer.WriteProperty<uint8_t>(1, "type", static_cast<uint8_t>(type));
-	serializer.WriteProperty<string>(2, "query", query);
-	serializer.WriteProperty<string>(3, "error", error);
-	serializer.WriteProperty<vector<LogicalType>>(4, "types", types);
-	serializer.WriteProperty<vector<string>>(5, "names", names);
-	if (type == MessageType::FETCH_RESULT) {
-		serializer.WriteObject(6, "data", [&](Serializer &serializer2) { data->Serialize(serializer2); });
+string duckdb::MessageTypeToString(MessageType type) {
+	switch (type) {
+	case MessageType::BIND_REQUEST:
+		return "BIND_REQUEST";
+	case MessageType::BIND_RESPONSE:
+		return "BIND_RESPONSE";
+	case MessageType::EXECUTE_REQUEST:
+		return "EXECUTE_REQUEST";
+	case MessageType::EXECUTE_RESPONSE:
+		return "EXECUTE_RESPONSE";
+	case MessageType::FETCH_REQUEST:
+		return "FETCH_REQUEST";
+	case MessageType::FETCH_RESPONSE:
+		return "FETCH_RESPONSE";
+	case MessageType::FETCH_DONE:
+		return "FETCH_DONE";
+	case MessageType::ERROR:
+		return "ERROR";
+	case MessageType::INVALID:
+		break;
 	}
+	return "INVALID";
 }
 
-unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deserializer) {
-	auto result = make_uniq<ProtocolMessage>();
-	result->type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(1, "type"));
-	result->query = deserializer.ReadProperty<string>(2, "query");
-	result->error = deserializer.ReadProperty<string>(3, "error");
-	result->types = deserializer.ReadProperty<vector<LogicalType>>(4, "types");
-	result->names = deserializer.ReadProperty<vector<string>>(5, "names");
-	if (result->type == MessageType::FETCH_RESULT) {
-		result->data = make_uniq<DataChunk>();
-		deserializer.ReadObject(6, "data",
-		                        [&](Deserializer &deserializer2) { result->data->Deserialize(deserializer2); });
-	}
-	return result;
-}
-
-void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) {
+void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	write_stream.Rewind();
 	SerializationOptions options;
 	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
@@ -38,8 +36,132 @@ void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) {
 	serializer.End();
 }
 
-unique_ptr<ProtocolMessage> ProtocolMessage::FromPayload(std::string const &payload) {
-	MemoryStream read_stream(data_ptr_cast((void *)payload.data()), payload.size());
+unique_ptr<ProtocolMessage> ProtocolMessage::FromMemoryStream(MemoryStream &read_stream) {
 	BinaryDeserializer deserializer(read_stream);
 	return Deserialize(deserializer);
+}
+
+void ProtocolMessage::Serialize(Serializer &serializer) const {
+	serializer.WriteProperty<uint8_t>(100, "message_type", static_cast<uint8_t>(message_type));
+}
+
+unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deserializer) {
+	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(100, "message_type"));
+	//	deserializer.Set<MessageType>(message_type); // TODO ??
+
+	unique_ptr<ProtocolMessage> result;
+	switch (message_type) {
+	case MessageType::BIND_REQUEST:
+		result = BindRequestMessage::Deserialize(deserializer);
+		break;
+	case MessageType::BIND_RESPONSE:
+		result = BindResponseMessage::Deserialize(deserializer);
+		break;
+	case MessageType::EXECUTE_REQUEST:
+		result = ExecuteRequestMessage::Deserialize(deserializer);
+		break;
+	case MessageType::EXECUTE_RESPONSE:
+		result = ExecuteResponseMessage::Deserialize(deserializer);
+		break;
+	case MessageType::FETCH_REQUEST:
+		result = FetchRequestMessage::Deserialize(deserializer);
+		break;
+	case MessageType::FETCH_RESPONSE:
+		result = FetchResponseMessage::Deserialize(deserializer);
+		break;
+	case MessageType::FETCH_DONE:
+		result = FetchDoneMessage::Deserialize(deserializer);
+		break;
+	case MessageType::ERROR:
+		result = ErrorMessage::Deserialize(deserializer);
+		break;
+	default:
+		throw SerializationException("Unsupported type for deserialization of Message!");
+	}
+	//	deserializer.Unset<MessageType>();
+	return result;
+}
+
+void BindRequestMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(200, "sql_query", sql_query);
+}
+
+unique_ptr<ProtocolMessage> BindRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
+	return make_uniq<BindRequestMessage>(sql_query);
+}
+
+void BindResponseMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
+	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
+}
+
+unique_ptr<ProtocolMessage> BindResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result_types = deserializer.ReadProperty<vector<LogicalType>>(210, "result_types");
+	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
+	return make_uniq<BindResponseMessage>(std::move(result_types), std::move(result_names));
+}
+
+void ExecuteRequestMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(220, "sql_query", sql_query);
+}
+
+unique_ptr<ProtocolMessage> ExecuteRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto sql_query = deserializer.ReadProperty<string>(220, "sql_query");
+	return make_uniq<ExecuteRequestMessage>(sql_query);
+}
+
+void ExecuteResponseMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	// 230
+}
+
+unique_ptr<ProtocolMessage> ExecuteResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result = make_uniq<ExecuteResponseMessage>();
+	return std::move(result);
+}
+
+void FetchRequestMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	// 240
+}
+
+unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = make_uniq<FetchRequestMessage>();
+	return std::move(result);
+}
+
+void FetchResponseMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteObject(250, "response_data",
+	                       [&](Serializer &inner_serializer) { response_data->Serialize(inner_serializer); });
+}
+
+unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result_chunk = make_uniq<DataChunk>();
+	deserializer.ReadObject(250, "response_data",
+	                        [&](Deserializer &inner_deserializer) { result_chunk->Deserialize(inner_deserializer); });
+	return make_uniq<FetchResponseMessage>(std::move(result_chunk));
+}
+
+void FetchDoneMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	// 240
+}
+
+unique_ptr<ProtocolMessage> FetchDoneMessage::Deserialize(Deserializer &deserializer) {
+	return make_uniq<FetchDoneMessage>();
+}
+
+void ErrorMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(260, "error_message", error_message);
+}
+
+unique_ptr<ProtocolMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
+	auto error_message = deserializer.ReadProperty<string>(260, "error_message");
+	return make_uniq<ErrorMessage>(error_message);
 }

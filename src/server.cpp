@@ -116,7 +116,10 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 		}
 
 		// TODO fork off thread
-		std::string message_data;
+
+		MemoryStream read_stream;
+
+		// TODO this is duplicated in client!!
 
 		int data_recv = 0;
 		do {
@@ -126,15 +129,15 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 				printf("Error on recv() call 1\n");
 				break; // TODO we probably want to close the connection in this case
 			}
-			message_data.resize(msg_len);
+			read_stream.GrowCapacity(msg_len);
 
-			data_recv = recv(client_socket_fd, (void *)message_data.data(), msg_len, MSG_WAITALL);
+			data_recv = recv(client_socket_fd, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
 			if (data_recv != msg_len) {
 				printf("Error on recv() call 2\n");
 
 				break; // TODO we probably want to close the connection in this case
 			}
-			auto received_message = ProtocolMessage::FromPayload(message_data);
+			auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 			rpc_server->HandleMessage(*received_message, [&](ProtocolMessage &response_message) -> void {
 				response_message.ToMemoryStream(rpc_server->write_stream);
 				idx_t msg_len = rpc_server->write_stream.GetPosition();
@@ -169,80 +172,76 @@ void RpcServer::Listen(uint32_t port) {
 
 // main switcheroo happens here
 void RpcServer::HandleMessage(ProtocolMessage &received_message, std::function<void(ProtocolMessage &)> send_fun) {
-	auto response_message = make_uniq<ProtocolMessage>();
-
-	switch (received_message.type) {
-	case MessageType::BIND: {
-		D_ASSERT(received_message.query.size() > 0);
-		printf("BIND %s\n", received_message.query.c_str());
-
-		response_message->type = MessageType::BIND_RESULT;
-
+	switch (received_message.Type()) {
+	case MessageType::BIND_REQUEST: {
+		auto bind_request_message = received_message.Cast<BindRequestMessage>();
+		printf("BIND %s\n", bind_request_message.Query().c_str());
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		auto prepare_result = internal_connection.Prepare(received_message.query);
+		auto prepare_result = internal_connection.Prepare(bind_request_message.Query());
+		unique_ptr<ProtocolMessage> response_message;
 		if (prepare_result->HasError()) {
-			response_message->type = MessageType::ERROR;
-			response_message->error = prepare_result->GetError();
+			response_message = make_uniq<ErrorMessage>(prepare_result->GetError());
 		} else {
-			response_message->types = prepare_result->GetTypes();
-			response_message->names = prepare_result->GetNames();
+			response_message = make_uniq<BindResponseMessage>(prepare_result->GetTypes(), prepare_result->GetNames());
 		}
 		send_fun(*response_message);
-		break;
+		return;
 	}
 		// TODO this currently does not do a whole lot....
-	case MessageType::EXECUTE: {
-		D_ASSERT(received_message.query.size() > 0);
-		printf("EXECUTE %s\n", received_message.query.c_str());
-
-		response_message->type = MessageType::EXECUTE_RESULT;
+	case MessageType::EXECUTE_REQUEST: {
+		auto execute_request_message = received_message.Cast<ExecuteRequestMessage>();
+		printf("EXECUTE %s\n", execute_request_message.Query().c_str());
 
 		// TODO we need to cache this connection in the ws connection somehow
 		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		query_result = internal_connection.PendingQuery(received_message.query, true)->Execute();
+		query_result = internal_connection.PendingQuery(execute_request_message.Query(), true)->Execute();
+		unique_ptr<ProtocolMessage> response_message;
 
 		if (query_result->HasError()) {
-			response_message->type = MessageType::ERROR;
-			response_message->error = query_result->GetError();
+			response_message = make_uniq<ErrorMessage>(query_result->GetError());
+		} else {
+			response_message = make_uniq<ExecuteResponseMessage>();
+			// TODO add a query handle here
 		}
 		send_fun(*response_message);
-		break;
+		return;
 	}
 
-	case MessageType::FETCH: {
+	case MessageType::FETCH_REQUEST: {
 		printf("FETCH\n");
 
-		response_message->type = MessageType::FETCH_RESULT;
-
-		while (true) {
-			response_message->data = query_result->Fetch();
-			if (!response_message->data || response_message->data->size() == 0) {
-				response_message->type = MessageType::FETCH_DONE;
-
-				send_fun(*response_message);
-				break;
-			}
-			// if (!response_message.data || response_message.data->size() == 0) {
-			// 	response_message.type = MessageType::FETCH_DONE;
-			// }
+		while (true) { // FIXME this just dumps the results on the client without asking for speed
+			auto result_chunk = query_result->Fetch();
+			unique_ptr<ProtocolMessage> response_message;
 
 			if (query_result->HasError()) {
-				response_message->type = MessageType::ERROR;
-				response_message->error = query_result->GetError();
+				response_message = make_uniq<ErrorMessage>(query_result->GetError());
+				send_fun(*response_message);
+				return;
+			} else {
+				if (!result_chunk || result_chunk->size() == 0) {
+					response_message = make_uniq<FetchDoneMessage>();
+					send_fun(*response_message);
+					return;
+				} else {
+					response_message = make_uniq<FetchResponseMessage>(std::move(result_chunk));
+				}
 			}
 			// FIXME send column data collection
 			send_fun(*response_message);
 		}
-		break;
+		return;
 	}
 	default: {
-		throw NotImplementedException("Unimplemented message type");
+		throw NotImplementedException("Unimplemented message type %s", MessageTypeToString(received_message.Type()));
 	}
 	}
 }
 
 void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
-	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
+	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
+
+	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 
 	HandleMessage(*received_message, [&](ProtocolMessage &response_message) -> void {
 		response_message.ToMemoryStream(write_stream);

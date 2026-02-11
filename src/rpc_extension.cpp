@@ -64,19 +64,11 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	auto client =
 	    make_uniq<RpcClient>(uri, StringUtil::StartsWith(StringUtil::Lower(uri), "wss://") ? WEB_SOCKET : UNIX_SOCKET);
 
-	auto bind_message = make_uniq<ProtocolMessage>();
-	bind_message->type = MessageType::BIND;
-	bind_message->query = query;
+	client->Schedule(make_uniq<BindRequestMessage>(query));
 
-	client->Schedule(std::move(bind_message));
-	auto bind_response = client->WaitForMessage();
-
-	if (bind_response->type != MessageType::BIND_RESULT) {
-		throw InvalidInputException("Expected bind result message, got error instead: %s",
-		                            bind_response->error.c_str());
-	}
-	return_types = bind_response->types;
-	names = bind_response->names;
+	auto bind_response = client->WaitForMessageType<BindResponseMessage>();
+	return_types = bind_response->Types();
+	names = bind_response->Names();
 
 	auto res = make_uniq<RpcTableBindData>();
 	res->client = std::move(client);
@@ -91,46 +83,22 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 	auto &client = *bind_data.client;
 
 	if (!did_execute) {
-		auto execute_message = make_uniq<ProtocolMessage>();
-		execute_message->type = MessageType::EXECUTE;
-		execute_message->query = bind_data.query;
-		client.Send(std::move(execute_message));
-		auto execute_response = client.WaitForMessage();
-		if (execute_response->type == MessageType::ERROR) {
-			throw InvalidInputException(execute_response->error);
-		}
-		if (execute_response->type != MessageType::EXECUTE_RESULT) {
-			throw InvalidInputException(execute_response->error);
-		}
-		auto fetch_message = make_uniq<ProtocolMessage>();
+		client.Send(std::move(make_uniq<ExecuteRequestMessage>(bind_data.query)));
+		// TODO we don't do anything with this>
+		client.WaitForMessageType<ExecuteResponseMessage>();
 		// now we do the first fetch
-		fetch_message->type = MessageType::FETCH;
-		client.Send(std::move(fetch_message));
-
+		client.Send(std::move(make_uniq<FetchRequestMessage>()));
 		did_execute = true;
 		done = false;
 	}
 
 	if (!done) {
-		// printf("GetData()\n");
+		auto fetch_response = client.WaitForMessageType<FetchResponseMessage>();
 
-		// auto fetch_message = make_uniq<ProtocolMessage>();
-		// // now we do the first fetch
-		// fetch_message->type = MessageType::FETCH;
-		// client.Send(std::move(fetch_message));
-		auto fetch_response = client.WaitForMessage();
-		if (fetch_response->type != MessageType::FETCH_RESULT) {
-			done = true;
-			return;
-		}
-		if (fetch_response->type == MessageType::ERROR) {
-			throw InvalidInputException(fetch_response->error);
-		}
-
-		output.Reference(*fetch_response->data);
-		output.SetCardinality(fetch_response->data->size());
+		output.Reference(fetch_response->ResponseData());
+		output.SetCardinality(fetch_response->ResponseData().size());
 		// printf("%llu", fetch_response->data->size());
-		if (fetch_response->data->size() == 0) {
+		if (fetch_response->ResponseData().size() == 0) {
 			done = true;
 		}
 	}

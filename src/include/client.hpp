@@ -24,7 +24,14 @@ struct RpcClient {
 	void OnOpen(websocketpp::connection_hdl hdl);
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
 	void OnFail(websocketpp::connection_hdl hdl);
-	unique_ptr<ProtocolMessage> WaitForMessage();
+
+	template <class TARGET>
+	unique_ptr<TARGET> WaitForMessageType() {
+		auto message = WaitForMessage(TARGET::TYPE).release();
+		return unique_ptr<TARGET>(reinterpret_cast<TARGET *>(message));
+	}
+
+	unique_ptr<ProtocolMessage> WaitForMessage(MessageType expected_type);
 
 	void SendInternal(websocketpp::connection_hdl hdl);
 	void Schedule(unique_ptr<ProtocolMessage> message_p);

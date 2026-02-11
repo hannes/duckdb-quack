@@ -88,8 +88,9 @@ void RpcClient::OnOpen(websocketpp::connection_hdl hdl) {
 }
 
 void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
-	auto received_message = ProtocolMessage::FromPayload(msg->get_payload());
-	//	printf("REC %d\n", received_message->type);
+	auto &payload = msg->get_payload();
+	MemoryStream read_stream((data_ptr_t)payload.data(), payload.size());
+	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 	std::unique_lock<std::mutex> lock(messages_mutex);
 	messages.push_front(std::move(received_message));
 	messages_wait.notify_one();
@@ -103,16 +104,16 @@ void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	throw InvalidInputException("RPC request failed: %s", con->get_ec().message().c_str());
 }
 
-unique_ptr<ProtocolMessage> RpcClient::WaitForMessage() {
+unique_ptr<ProtocolMessage> RpcClient::WaitForMessage(MessageType expected_type) {
+	unique_ptr<ProtocolMessage> result;
 	if (mode == WEB_SOCKET) {
 		std::unique_lock<std::mutex> lock(messages_mutex);
 		messages_wait.wait(lock, [=] { return !messages.empty(); });
 		auto result(std::move(messages.back()));
 		messages.pop_back();
-		return result;
 	}
 	if (mode == UNIX_SOCKET) {
-		std::string message_data;
+		MemoryStream read_stream;
 
 		int data_recv = 0;
 		idx_t msg_len;
@@ -120,15 +121,26 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessage() {
 		if (data_recv != sizeof(idx_t)) {
 			throw InternalException("Receive error 1 %llu %lld %s", msg_len, data_recv, strerror(errno));
 		}
-		message_data.resize(msg_len);
+		read_stream.GrowCapacity(msg_len);
 
-		data_recv = recv(unix_socket, (void *)message_data.data(), msg_len, MSG_WAITALL);
+		data_recv = recv(unix_socket, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
 		if (data_recv != msg_len) {
 			throw InternalException("Receive error 2 %llu %lld %s", msg_len, data_recv, strerror(errno));
 		}
-		return ProtocolMessage::FromPayload(message_data);
+		result = ProtocolMessage::FromMemoryStream(read_stream);
 	}
-	throw InternalException("Invalid mode");
+
+	if (result->Type() != expected_type) {
+		if (result->Type() == MessageType::ERROR) {
+			throw InvalidInputException("Expected %s message, got error message instead: %s",
+			                            MessageTypeToString(expected_type),
+			                            result->Cast<ErrorMessage>().Error().c_str());
+		}
+		throw InvalidInputException("Expected %s message, got %s instead", MessageTypeToString(expected_type),
+		                            MessageTypeToString(result->Type()));
+	}
+
+	return result;
 }
 
 void RpcClient::SendInternal(websocketpp::connection_hdl hdl) {
