@@ -34,7 +34,12 @@ static void ConnectionThread(void *rpc_client_p) {
 	rpc_client->c.run();
 }
 
-RpcClient::RpcClient(string &uri_p, Mode mode_p) : uri(uri_p), mode(mode_p) {
+RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
+	if (StringUtil::StartsWith(uri, "wss:")) {
+		mode = WEB_SOCKET;
+	} else {
+		mode = UNIX_SOCKET;
+	}
 	if (mode == WEB_SOCKET) {
 		// some ugly setup
 		c.set_access_channels(websocketpp::log::alevel::none);

@@ -17,7 +17,7 @@ typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
 enum Mode { WEB_SOCKET, UNIX_SOCKET };
 
 struct RpcClient {
-	RpcClient(string &uri_p, Mode mode_p);
+	RpcClient(const string &uri_p);
 
 	~RpcClient();
 

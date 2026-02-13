@@ -14,14 +14,6 @@
 #include "server.hpp"
 #include "client.hpp"
 
-typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
-typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
-typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
-
-using websocketpp::lib::bind;
-using websocketpp::lib::placeholders::_1;
-using websocketpp::lib::placeholders::_2;
-
 namespace duckdb {
 
 const static std::string STORAGE_EXTENSION_KEY = "rpc";
@@ -43,9 +35,25 @@ public:
 		}
 	}
 
+	RpcClient &FindOrCreateClient(ClientContext &context, const std::string &server_address) {
+		std::lock_guard<std::mutex> lock(server_mutex);
+		auto client_key = server_address + '#' + to_string(context.GetConnectionId());
+		auto it = clients.find(client_key);
+		if (it == clients.end()) {
+			auto client = make_uniq<RpcClient>(server_address);
+			clients.emplace(client_key, std::move(client));
+			return *clients[client_key];
+		} else {
+			return *it->second;
+		}
+	}
+
 private:
 	std::mutex server_mutex;
 	unordered_map<string, unique_ptr<RpcServer>> servers;
+
+	std::mutex client_mutex;
+	unordered_map<string, unique_ptr<RpcClient>> clients;
 };
 
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -66,11 +74,13 @@ RcpcStorageExtensionInfo &RcpcStorageExtensionInfo::GetState(const DatabaseInsta
 }
 
 struct RpcTableBindData : FunctionData {
-	explicit RpcTableBindData() {
+	explicit RpcTableBindData(RpcClient &client_p) : client(client_p) {
 	}
 
-	unique_ptr<RpcClient> client;
+	// FIXME this should not be here
 	string query;
+
+	RpcClient &client;
 
 	bool Equals(const FunctionData &other_p) const override {
 		throw NotImplementedException("Equals not implemented");
@@ -86,17 +96,15 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	// Set logging to be pretty verbose (everything except message payloads)
 	auto uri = input.inputs[0].GetValue<string>();
 	auto query = input.inputs[1].GetValue<string>();
-	auto client =
-	    make_uniq<RpcClient>(uri, StringUtil::StartsWith(StringUtil::Lower(uri), "wss://") ? WEB_SOCKET : UNIX_SOCKET);
+	auto &client = RcpcStorageExtensionInfo::GetState(*context.db).FindOrCreateClient(context, uri);
 
-	client->Schedule(make_uniq<BindRequestMessage>(query));
+	client.Schedule(make_uniq<BindRequestMessage>(query));
 
-	auto bind_response = client->WaitForMessageType<BindResponseMessage>();
+	auto bind_response = client.WaitForMessageType<BindResponseMessage>();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
-	auto res = make_uniq<RpcTableBindData>();
-	res->client = std::move(client);
+	auto res = make_uniq<RpcTableBindData>(client);
 	res->query = query;
 
 	return res;
@@ -115,19 +123,17 @@ static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataC
 	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
 	auto &function_state = input.global_state->Cast<RpcTableFunctionState>();
 
-	auto &client = *bind_data.client;
-
 	if (!function_state.did_execute) {
-		client.Send(make_uniq<ExecuteRequestMessage>(bind_data.query));
+		bind_data.client.Send(make_uniq<ExecuteRequestMessage>(bind_data.query));
 		// TODO we don't do anything with this>
-		auto execute_response = client.WaitForMessageType<ExecuteResponseMessage>();
+		auto execute_response = bind_data.client.WaitForMessageType<ExecuteResponseMessage>();
 		// now we do the first fetch
-		client.Send(make_uniq<FetchRequestMessage>());
+		bind_data.client.Send(make_uniq<FetchRequestMessage>());
 		function_state.did_execute = true;
 	}
 
 	if (!function_state.done) {
-		auto fetch_response = client.WaitForMessageType<FetchResponseMessage>();
+		auto fetch_response = bind_data.client.WaitForMessageType<FetchResponseMessage>();
 		if (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
 			output.Reference(*fetch_response->ResponseData());
 			output.SetCardinality(fetch_response->ResponseData()->size());
