@@ -2,36 +2,61 @@
 # description: test rpc extension
 # group: [sql]
 
-# Require statement will ensure this test is run with this extension loaded
 require rpc
 
+foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4242'
+
 statement ok con1
-select start_rpc_server('__TEST_DIR__/duckdb-rpc-socket');
+select start_rpc_server(${server});
 
 sleep 100 millisecond
 
 query I con2
-from call_rpc_server('__TEST_DIR__/duckdb-rpc-socket', 'select 42')
+from call_rpc_server(${server}, 'select 42')
 ----
 42
 
+statement error con2
+from call_rpc_server(${server}, '')
+----
+Error
+
+
+statement error con2
+from call_rpc_server(${server}, 'selexxxct 42')
+----
+Error
+
 query I con2
-select max(range) from call_rpc_server('__TEST_DIR__/duckdb-rpc-socket', 'from range(100000)')
+select max(range) from call_rpc_server(${server}, 'from range(100000)')
 ----
 99999
 
 
+# some error cases
+statement error con2
+from call_rpc_server(${server}, NULL)
+----
+cannot be NULL
 
-# query I con2
-# from call_rpc_server('wss://localhost:4242', 'select max(range) from range(10000)')
-# ----
-# 9999
-#
-# statement ok con2
-# from call_rpc_server('wss://localhost:4242', 'from test_all_types()')
-#
-#
-# statement error con2
-# from call_rpc_server('wss://localhost:4242', 'not_a_valid_quer')
-# ----
-# Parser Error
+statement error con2
+from call_rpc_server(NULL, '')
+----
+cannot be NULL
+
+statement error con1
+select start_rpc_server()
+----
+
+statement error con1
+select start_rpc_server('')
+----
+
+# This may be unexpected but oh well
+query I con1
+select start_rpc_server(NULL)
+----
+NULL
+
+
+endloop

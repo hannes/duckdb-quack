@@ -84,30 +84,33 @@ static void ListenThread(void *rpc_server_p) {
 
 static void ListenUnixSocketThread(void *rpc_server_p) {
 	auto rpc_server = (RpcServer *)rpc_server_p;
-	struct sockaddr_un local;
+	D_ASSERT(rpc_server);
 
-	auto s = socket(AF_UNIX, SOCK_STREAM, 0);
-	local.sun_family = AF_UNIX;
-
-	memset(&local, 0, sizeof(struct sockaddr_un));
-
-	strcpy(local.sun_path, rpc_server->listen_string.c_str());
-	// TODO check errors on this one
-	unlink(local.sun_path);
-	auto len = SUN_LEN(&local);
-	if (bind(s, (struct sockaddr *)&local, len)) {
-		throw std::runtime_error("Error on binding socket \n");
+	auto server_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (server_socket_fd == -1) {
+		throw IOException("Error creating socket");
 	}
 
-	if (listen(s, 42 /* TODO: magic constant */)) {
-		throw std::runtime_error("Error on listen call \n");
+	sockaddr_un socket_address;
+	socket_address.sun_family = AF_UNIX;
+	memset(&socket_address, 0, sizeof(sockaddr_un));
+	strncpy(socket_address.sun_path, rpc_server->listen_string.c_str(), sizeof(socket_address.sun_path) - 1);
+
+	auto unlink_result = unlink(socket_address.sun_path);
+	if (unlink_result && errno != ENOENT) {
+		throw IOException("Error cleaning up socket %s: %s", (const char *)socket_address.sun_path, strerror(errno));
+	}
+
+	if (bind(server_socket_fd, (sockaddr *)&socket_address, SUN_LEN(&socket_address)) ||
+	    listen(server_socket_fd, 42 /* TODO: magic constant */)) {
+		throw IOException("Error listening to socket %s: %s", (const char *)socket_address.sun_path, strerror(errno));
 	}
 
 	while (true) {
 		int client_socket_fd = 0;
 
 		unsigned int sock_len = 0;
-		if ((client_socket_fd = accept(s, (struct sockaddr *)&local, &sock_len)) == -1) {
+		if ((client_socket_fd = accept(server_socket_fd, (sockaddr *)&socket_address, &sock_len)) == -1) {
 			continue;
 		}
 
@@ -134,15 +137,18 @@ void RpcServer::Listen(const string &listen_string_p) {
 	}
 	listen_string = listen_string_p;
 	if (StringUtil::StartsWith(listen_string, "wss:")) {
-		s.listen(atoi(StringUtil::Replace(listen_string, "wss:", "").c_str()));
+		// TODO this is overly simplistic but fine for now
+		auto listen_port = atoi(StringUtil::Replace(listen_string, "wss://localhost:", "").c_str());
+		if (listen_port < 1 || listen_port > 65535) {
+			throw InvalidInputException("Invalid port specified for websocket server (%d)", listen_port);
+		}
+		s.listen(listen_port);
 
-		// TODO make this cancellable
 		listen_thread = std::thread([=]() {
 			ListenThread(this);
 			return 1;
 		});
 	} else {
-		// TODO make this cancellable
 		unix_socket_thread = std::thread([=]() {
 			ListenUnixSocketThread(this);
 			return 1;

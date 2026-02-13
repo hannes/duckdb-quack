@@ -59,6 +59,9 @@ private:
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.AllConstant());
 	auto listen_string = args.GetValue(0, 0).GetValue<string>();
+	if (listen_string.empty()) {
+		throw InvalidInputException("Empty listen string specified");
+	}
 	auto &rpc_state = RcpcStorageExtensionInfo::GetState(*state.GetContext().db);
 	rpc_state.FindOrCreateServer(state.GetContext(), listen_string);
 	result.SetValue(0, StringUtil::Format("Listening on %s", listen_string));
@@ -94,8 +97,14 @@ struct RpcTableBindData : FunctionData {
 static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
+
+	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
+		throw BinderException("call_rpc_server URI and query parameters cannot be NULL");
+	}
+
 	auto uri = input.inputs[0].GetValue<string>();
 	auto query = input.inputs[1].GetValue<string>();
+
 	auto &client = RcpcStorageExtensionInfo::GetState(*context.db).FindOrCreateClient(context, uri);
 
 	client.Schedule(make_uniq<BindRequestMessage>(query));

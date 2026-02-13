@@ -40,6 +40,7 @@ RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
 	} else {
 		mode = UNIX_SOCKET;
 	}
+
 	if (mode == WEB_SOCKET) {
 		// some ugly setup
 		c.set_access_channels(websocketpp::log::alevel::none);
@@ -106,7 +107,7 @@ void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	client::connection_ptr con = c.get_con_from_hdl(hdl);
 	// TODO there is more error stuff to expose here if required
-	throw InvalidInputException("RPC request failed: %s", con->get_ec().message().c_str());
+	throw InvalidInputException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
 }
 
 unique_ptr<ProtocolMessage> RpcClient::WaitForMessage(MessageType expected_type) {
