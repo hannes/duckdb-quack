@@ -68,11 +68,11 @@ static context_ptr OnTlsInit(tls_mode mode, websocketpp::connection_hdl hdl) {
 	return ctx;
 }
 
-RpcServer::RpcServer(ClientContext &context_p) : context(context_p), internal_connection(*context.db) {
-	s.set_access_channels(websocketpp::log::alevel::none);
-	s.set_tls_init_handler(bind(&OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
-	s.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
-	s.init_asio();
+RpcServer::RpcServer(ClientContext &context_p) : context(context_p) {
+}
+
+RpcServer::~RpcServer() {
+	s.stop();
 }
 
 static void ListenThread(void *rpc_server_p) {
@@ -115,7 +115,7 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 			continue;
 		}
 
-		// TODO fork off thread
+		// TODO fork off another thread here
 		bool open = true;
 		do {
 			try {
@@ -138,6 +138,11 @@ void RpcServer::Listen(const string &listen_string_p) {
 	}
 	listen_string = listen_string_p;
 	if (StringUtil::StartsWith(listen_string, "wss:")) {
+		s.set_access_channels(websocketpp::log::alevel::none);
+		s.set_tls_init_handler(bind(&OnTlsInit, MOZILLA_INTERMEDIATE, ::_1));
+		s.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
+		s.init_asio();
+
 		// TODO this is overly simplistic but fine for now
 		auto listen_port = atoi(StringUtil::Replace(listen_string, "wss://localhost:", "").c_str());
 		if (listen_port < 1 || listen_port > 65535) {
@@ -161,45 +166,60 @@ void RpcServer::Listen(const string &listen_string_p) {
 void RpcServer::HandleMessage(ProtocolMessage &received_message,
                               std::function<void(unique_ptr<ProtocolMessage>)> send_fun) {
 	switch (received_message.Type()) {
-	case MessageType::BIND_REQUEST: {
-		auto bind_request_message = received_message.Cast<BindRequestMessage>();
-		auto prepare_result = internal_connection.Prepare(bind_request_message.Query());
-		if (prepare_result->HasError()) {
-			send_fun(make_uniq<ErrorMessage>(prepare_result->GetError()));
-			return;
-		}
-		send_fun(make_uniq<BindResponseMessage>(prepare_result->GetTypes(), prepare_result->GetNames()));
+	case MessageType::CONNECTION_REQUEST: {
+		auto connection_request_message = received_message.Cast<ConnectionRequestMessage>();
+		// TODO handle auth here! Only return a connection ID if auth succeeds.
+		send_fun(make_uniq<ConnectionResponseMessage>(CreateNewConnection()));
 		return;
 	}
-	case MessageType::EXECUTE_REQUEST: {
-		auto execute_request_message = received_message.Cast<ExecuteRequestMessage>();
-		// TODO we need to cache this connection in the ws connection somehow
-		// TODO: does this have to happen in a background thread? Is there going to be an async api for this?
-		query_result = internal_connection.PendingQuery(execute_request_message.Query(), true)->Execute();
+	case MessageType::PREPARE_REQUEST: {
+		auto prepare_request_message = received_message.Cast<PrepareRequestMessage>();
+		optional_ptr<RpcConnection> rpc_connection = GetConnection(prepare_request_message.ConnectionId());
+
+		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
+		if (statement->HasError()) {
+			send_fun(make_uniq<ErrorMessage>(statement->GetError()));
+			return;
+		}
+		rpc_connection->duckdb_statement = std::move(statement);
+
+		vector<Value> params; // TODO allow parameters?
+		auto query_result = rpc_connection->duckdb_statement->PendingQuery(params, true)->Execute();
+
 		if (query_result->HasError()) {
 			send_fun(make_uniq<ErrorMessage>(query_result->GetError()));
 			return;
 		}
-		// TODO add a query handle here
-		send_fun(make_uniq<ExecuteResponseMessage>());
+
+		rpc_connection->duckdb_query_result = std::move(query_result);
+		send_fun(make_uniq<PrepareResponseMessage>(rpc_connection->duckdb_statement->GetTypes(),
+		                                           rpc_connection->duckdb_statement->GetNames()));
 		return;
 	}
 
 	case MessageType::FETCH_REQUEST: {
-		while (true) { // FIXME this just dumps the results on the client without asking for speed
-			auto result_chunk = query_result->Fetch();
-
-			if (query_result->HasError()) {
-				send_fun(make_uniq<ErrorMessage>(query_result->GetError()));
-				return;
-			}
-			if (!result_chunk || result_chunk->size() == 0) {
-				send_fun(make_uniq<FetchResponseMessage>(nullptr));
-				return;
-			}
-			// FIXME send column data collection instead?
-			send_fun(make_uniq<FetchResponseMessage>(std::move(result_chunk)));
+		auto fetch_request_message = received_message.Cast<FetchRequestMessage>();
+		optional_ptr<RpcConnection> rpc_connection = GetConnection(fetch_request_message.ConnectionId());
+		if (!rpc_connection->duckdb_query_result || rpc_connection->duckdb_query_result->HasError()) {
+			send_fun(make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result
+			                                     ? rpc_connection->duckdb_query_result->GetError()
+			                                     : "No query result found"));
+			return;
 		}
+		// while (true) { // FIXME this just dumps the results on the client without asking for speed
+		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
+
+		if (rpc_connection->duckdb_query_result->HasError()) {
+			send_fun(make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError()));
+			return;
+		}
+		if (!result_chunk || result_chunk->size() == 0) {
+			send_fun(make_uniq<FetchResponseMessage>(nullptr));
+			return;
+		}
+		// FIXME send column data collection instead?
+		send_fun(make_uniq<FetchResponseMessage>(std::move(result_chunk)));
+		//}
 		return;
 	}
 	default: {
@@ -210,17 +230,16 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message,
 
 void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
-
-	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
-
-	HandleMessage(*received_message, [&](unique_ptr<ProtocolMessage> response_message) -> void {
-		response_message->ToMemoryStream(write_stream);
-		try {
-			s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-		} catch (websocketpp::exception const &e) {
-			// TODO we should not fail here but log something
-			std::cout << "bind reply failed because: "
-			          << "(" << e.what() << ")" << std::endl;
-		}
-	});
+	HandleMessage(
+	    *ProtocolMessage::FromMemoryStream(read_stream), [&](unique_ptr<ProtocolMessage> response_message) -> void {
+		    MemoryStream write_stream;
+		    response_message->ToMemoryStream(write_stream);
+		    try {
+			    s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+		    } catch (websocketpp::exception const &e) {
+			    // TODO we should not fail here but log something
+			    std::cout << "bind reply failed because: "
+			              << "(" << e.what() << ")" << std::endl;
+		    }
+	    });
 }

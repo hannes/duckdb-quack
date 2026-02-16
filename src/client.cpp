@@ -120,7 +120,6 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expect
 	if (mode == UNIX_SOCKET) {
 		result = ProtocolMessage::FromSocket(unix_socket);
 	}
-
 	if (result->Type() != expected_type) {
 		if (result->Type() == MessageType::ERROR) {
 			throw InvalidInputException("Expected %s message, got error message instead: %s",

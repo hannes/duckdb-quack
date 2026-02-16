@@ -8,7 +8,7 @@
 #include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/storage/storage_extension.hpp"
 
-#define ASIO_STANDALONE // no boost!
+#define ASIO_STANDALONE // no boost!!
 
 #include "message.hpp"
 #include "server.hpp"
@@ -20,39 +20,42 @@ const static std::string STORAGE_EXTENSION_KEY = "rpc";
 
 class RcpcStorageExtensionInfo : public StorageExtensionInfo {
 public:
-	static RcpcStorageExtensionInfo &GetState(const DatabaseInstance &instance);
+	static RcpcStorageExtensionInfo &GetState(const DatabaseInstance &instance) {
+		auto &config = instance.config;
+		auto ext = StorageExtension::Find(config, STORAGE_EXTENSION_KEY);
+		if (!ext) {
+			throw std::runtime_error("Fatal error: couldn't find rpc extension state.");
+		}
+		return *static_cast<RcpcStorageExtensionInfo *>(ext->storage_info.get());
+	}
 
 	RpcServer &FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
-		std::lock_guard<std::mutex> lock(server_mutex);
+		std::lock_guard<std::mutex> lock(state_mutex);
 		auto it = servers.find(listen_string);
-		if (it == servers.end()) {
-			auto server = make_uniq<RpcServer>(context);
-			server->Listen(listen_string);
-			servers.emplace(listen_string, std::move(server));
-			return *servers[listen_string];
-		} else {
+		if (it != servers.end()) {
 			return *it->second;
 		}
+		auto server = make_uniq<RpcServer>(context);
+		server->Listen(listen_string);
+		servers.emplace(listen_string, std::move(server));
+		return *servers[listen_string];
 	}
 
 	RpcClient &FindOrCreateClient(ClientContext &context, const std::string &server_address) {
-		std::lock_guard<std::mutex> lock(server_mutex);
+		std::lock_guard<std::mutex> lock(state_mutex);
 		auto client_key = server_address + '#' + to_string(context.GetConnectionId());
 		auto it = clients.find(client_key);
-		if (it == clients.end()) {
-			auto client = make_uniq<RpcClient>(server_address);
-			clients.emplace(client_key, std::move(client));
-			return *clients[client_key];
-		} else {
+		if (it != clients.end()) {
 			return *it->second;
 		}
+		auto client = make_uniq<RpcClient>(server_address);
+		clients.emplace(client_key, std::move(client));
+		return *clients[client_key];
 	}
 
 private:
-	std::mutex server_mutex;
+	std::mutex state_mutex;
 	unordered_map<string, unique_ptr<RpcServer>> servers;
-
-	std::mutex client_mutex;
 	unordered_map<string, unique_ptr<RpcClient>> clients;
 };
 
@@ -67,21 +70,11 @@ inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result
 	result.SetValue(0, StringUtil::Format("Listening on %s", listen_string));
 }
 
-RcpcStorageExtensionInfo &RcpcStorageExtensionInfo::GetState(const DatabaseInstance &instance) {
-	auto &config = instance.config;
-	auto ext = StorageExtension::Find(config, STORAGE_EXTENSION_KEY);
-	if (!ext) {
-		throw std::runtime_error("Fatal error: couldn't find rpc extension state.");
-	}
-	return *static_cast<RcpcStorageExtensionInfo *>(ext->storage_info.get());
-}
-
 struct RpcTableBindData : FunctionData {
-	explicit RpcTableBindData(RpcClient &client_p) : client(client_p) {
+	explicit RpcTableBindData(const string &connection_id_p, RpcClient &client_p)
+	    : connection_id(connection_id_p), client(client_p) {
 	}
-
-	// FIXME this should not be here
-	string query;
+	string connection_id;
 
 	RpcClient &client;
 
@@ -97,7 +90,6 @@ struct RpcTableBindData : FunctionData {
 static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
                                                 vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
-
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("call_rpc_server URI and query parameters cannot be NULL");
 	}
@@ -107,21 +99,21 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 
 	auto &client = RcpcStorageExtensionInfo::GetState(*context.db).FindOrCreateClient(context, uri);
 
-	// TODO combine send and wait?!
-	client.Send(make_uniq<BindRequestMessage>(query));
-	auto bind_response = client.WaitForMessage<BindResponseMessage>();
+	client.Send(make_uniq<ConnectionRequestMessage>());
+	auto connection_request_response = client.WaitForMessage<ConnectionResponseMessage>();
+
+	auto bind_data = make_uniq<RpcTableBindData>(connection_request_response->ConnectionId(), client);
+
+	client.Send(make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	auto bind_response = client.WaitForMessage<PrepareResponseMessage>();
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
-	auto res = make_uniq<RpcTableBindData>(client);
-	res->query = query;
-
-	return res;
+	return bind_data;
 }
 
 struct RpcTableFunctionState : GlobalTableFunctionState {
-	bool did_execute = false;
 	bool done = false;
 };
 
@@ -132,15 +124,7 @@ static unique_ptr<GlobalTableFunctionState> RpcTableFunInit(ClientContext &conte
 static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
 	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
 	auto &function_state = input.global_state->Cast<RpcTableFunctionState>();
-
-	if (!function_state.did_execute) {
-		bind_data.client.Send(make_uniq<ExecuteRequestMessage>(bind_data.query));
-		// TODO we don't do anything with this>
-		auto execute_response = bind_data.client.WaitForMessage<ExecuteResponseMessage>();
-		// now we do the first fetch
-		bind_data.client.Send(make_uniq<FetchRequestMessage>());
-		function_state.did_execute = true;
-	}
+	bind_data.client.Send(make_uniq<FetchRequestMessage>(bind_data.connection_id));
 
 	if (!function_state.done) {
 		auto fetch_response = bind_data.client.WaitForMessage<FetchResponseMessage>();

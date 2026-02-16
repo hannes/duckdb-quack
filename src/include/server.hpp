@@ -28,15 +28,43 @@ struct RpcServer {
 
 	ClientContext &context;
 
-	// FIXME have one duckdb per ws connection!
-	Connection internal_connection;
-	unique_ptr<QueryResult> query_result;
+	~RpcServer();
+
+	std::mutex active_connections_mutex;
+	struct RpcConnection {
+		unique_ptr<Connection> duckdb_connection;
+		unique_ptr<PreparedStatement> duckdb_statement;
+		unique_ptr<QueryResult> duckdb_query_result;
+	};
+	unordered_map<string, RpcConnection> active_connections;
+
+	// TODO move this to implementation
+	optional_ptr<RpcConnection> GetConnection(const string &connection_id) {
+		std::lock_guard<std::mutex> lock(active_connections_mutex);
+		auto it = active_connections.find(connection_id);
+		if (it != active_connections.end()) {
+			return it->second;
+		}
+		throw IOException("Invalid connection id");
+	}
+
+	string CreateNewConnection() {
+		std::lock_guard<std::mutex> lock(active_connections_mutex);
+		// TODO this will need cryptographic randomness I fear
+		RpcConnection new_connection;
+		new_connection.duckdb_connection = make_uniq<Connection>(*context.db);
+		auto connection_id = StringUtil::GenerateRandomName(40);
+		D_ASSERT(active_connections.find(connection_id) == active_connections.end());
+		active_connections[connection_id] = std::move(new_connection);
+		return connection_id;
+	}
+
+	// TODO need something to destroy connections
+
 	std::thread listen_thread;
 	std::thread unix_socket_thread;
 
 	server s;
-	//	FIXME this should probably also exist per-connection!
-	MemoryStream write_stream;
 
 	string listen_string;
 };

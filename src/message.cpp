@@ -5,14 +5,14 @@ using namespace duckdb;
 
 string duckdb::MessageTypeToString(MessageType type) {
 	switch (type) {
-	case MessageType::BIND_REQUEST:
-		return "BIND_REQUEST";
-	case MessageType::BIND_RESPONSE:
-		return "BIND_RESPONSE";
-	case MessageType::EXECUTE_REQUEST:
-		return "EXECUTE_REQUEST";
-	case MessageType::EXECUTE_RESPONSE:
-		return "EXECUTE_RESPONSE";
+	case MessageType::CONNECTION_REQUEST:
+		return "CONNECTION_REQUEST";
+	case MessageType::CONNECTION_RESPONSE:
+		return "CONNECTION_RESPONSE";
+	case MessageType::PREPARE_REQUEST:
+		return "PREPARE_REQUEST";
+	case MessageType::PREPARE_RESPONSE:
+		return "PREPARE_RESPONSE";
 	case MessageType::FETCH_REQUEST:
 		return "FETCH_REQUEST";
 	case MessageType::FETCH_RESPONSE:
@@ -77,21 +77,21 @@ void ProtocolMessage::Serialize(Serializer &serializer) const {
 
 unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deserializer) {
 	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(100, "message_type"));
-	//	deserializer.Set<MessageType>(message_type); // TODO ??
 
 	unique_ptr<ProtocolMessage> result;
+
 	switch (message_type) {
-	case MessageType::BIND_REQUEST:
-		result = BindRequestMessage::Deserialize(deserializer);
+	case MessageType::CONNECTION_REQUEST:
+		result = ConnectionRequestMessage::Deserialize(deserializer);
 		break;
-	case MessageType::BIND_RESPONSE:
-		result = BindResponseMessage::Deserialize(deserializer);
+	case MessageType::CONNECTION_RESPONSE:
+		result = ConnectionResponseMessage::Deserialize(deserializer);
 		break;
-	case MessageType::EXECUTE_REQUEST:
-		result = ExecuteRequestMessage::Deserialize(deserializer);
+	case MessageType::PREPARE_REQUEST:
+		result = PrepareRequestMessage::Deserialize(deserializer);
 		break;
-	case MessageType::EXECUTE_RESPONSE:
-		result = ExecuteResponseMessage::Deserialize(deserializer);
+	case MessageType::PREPARE_RESPONSE:
+		result = PrepareResponseMessage::Deserialize(deserializer);
 		break;
 	case MessageType::FETCH_REQUEST:
 		result = FetchRequestMessage::Deserialize(deserializer);
@@ -105,60 +105,62 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 	default:
 		throw SerializationException("Unsupported type for deserialization of Message!");
 	}
-	//	deserializer.Unset<MessageType>();
+
 	return result;
 }
 
-void BindRequestMessage::Serialize(Serializer &serializer) const {
+void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
+}
+
+unique_ptr<ProtocolMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
+	return make_uniq<ConnectionRequestMessage>();
+}
+
+void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(101, "connection_id", connection_id);
+}
+
+unique_ptr<ProtocolMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
+	return make_uniq<ConnectionResponseMessage>(connection_id);
+}
+
+void PrepareRequestMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(101, "connection_id", connection_id);
 	serializer.WriteProperty<string>(200, "sql_query", sql_query);
 }
 
-unique_ptr<ProtocolMessage> BindRequestMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<ProtocolMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
 	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
-	return make_uniq<BindRequestMessage>(sql_query);
+	return make_uniq<PrepareRequestMessage>(connection_id, sql_query);
 }
 
-void BindResponseMessage::Serialize(Serializer &serializer) const {
+void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
 	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
 }
 
-unique_ptr<ProtocolMessage> BindResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result_types = deserializer.ReadProperty<vector<LogicalType>>(210, "result_types");
 	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
-	return make_uniq<BindResponseMessage>(std::move(result_types), std::move(result_names));
-}
-
-void ExecuteRequestMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(220, "sql_query", sql_query);
-}
-
-unique_ptr<ProtocolMessage> ExecuteRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto sql_query = deserializer.ReadProperty<string>(220, "sql_query");
-	return make_uniq<ExecuteRequestMessage>(sql_query);
-}
-
-void ExecuteResponseMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
-	// 230
-}
-
-unique_ptr<ProtocolMessage> ExecuteResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto result = make_uniq<ExecuteResponseMessage>();
-	return std::move(result);
+	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names));
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(101, "connection_id", connection_id);
+
 	// 240
 }
 
 unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto result = make_uniq<FetchRequestMessage>();
-	return std::move(result);
+	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
+	return make_uniq<FetchRequestMessage>(connection_id);
 }
 
 void FetchResponseMessage::Serialize(Serializer &serializer) const {

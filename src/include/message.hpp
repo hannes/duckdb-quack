@@ -8,12 +8,12 @@ namespace duckdb {
 
 enum class MessageType : uint8_t {
 	INVALID = 0,
-	BIND_REQUEST = 1,
-	BIND_RESPONSE = 2,
-	EXECUTE_REQUEST = 3,
-	EXECUTE_RESPONSE = 4,
-	FETCH_REQUEST = 5,
-	FETCH_RESPONSE = 6,
+	CONNECTION_REQUEST = 1,
+	CONNECTION_RESPONSE = 2,
+	PREPARE_REQUEST = 3,
+	PREPARE_RESPONSE = 4,
+	FETCH_REQUEST = 7,
+	FETCH_RESPONSE = 8,
 	ERROR = 100
 };
 
@@ -57,11 +57,12 @@ protected:
 	MessageType message_type = MessageType::INVALID;
 };
 
-class BindRequestMessage : public ProtocolMessage {
+class PrepareRequestMessage : public ProtocolMessage {
 public:
-	static constexpr const MessageType TYPE = MessageType::BIND_REQUEST;
+	static constexpr MessageType TYPE = MessageType::PREPARE_REQUEST;
 
-	BindRequestMessage(const string &sql_query_p) : ProtocolMessage(TYPE), sql_query(sql_query_p) {
+	PrepareRequestMessage(const string &connection_id_p, const string &sql_query_p)
+	    : ProtocolMessage(TYPE), connection_id(connection_id_p), sql_query(sql_query_p) {
 	}
 	const std::string Query() const {
 		return sql_query;
@@ -69,15 +70,21 @@ public:
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
+	const std::string ConnectionId() const {
+		return connection_id;
+	}
+
 private:
-	string sql_query; // FIXME do we want a string here
-	BindRequestMessage() : ProtocolMessage(TYPE) {};
+	string connection_id; // FIXME abstract this to some superclass
+	string sql_query;
+
+	PrepareRequestMessage() : ProtocolMessage(TYPE) {};
 };
 
-class BindResponseMessage : public ProtocolMessage {
+class PrepareResponseMessage : public ProtocolMessage {
 public:
-	static constexpr const MessageType TYPE = MessageType::BIND_RESPONSE;
-	BindResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p)
+	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
+	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p)
 	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p) {};
 
 	const vector<LogicalType> &Types() const {
@@ -95,45 +102,56 @@ private:
 	vector<string> result_names;
 };
 
-class ExecuteRequestMessage : public ProtocolMessage {
+// TODO this is where auth goes
+class ConnectionRequestMessage : public ProtocolMessage {
 public:
-	static constexpr const MessageType TYPE = MessageType::EXECUTE_REQUEST;
-	ExecuteRequestMessage(const string &sql_query_p) : ProtocolMessage(TYPE), sql_query(sql_query_p) {};
-	const std::string Query() const {
-		return sql_query;
+	static constexpr MessageType TYPE = MessageType::CONNECTION_REQUEST;
+
+	ConnectionRequestMessage() : ProtocolMessage(TYPE) {
+	}
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+};
+
+class ConnectionResponseMessage : public ProtocolMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::CONNECTION_RESPONSE;
+
+	ConnectionResponseMessage(const string &connection_id_p) : ProtocolMessage(TYPE), connection_id(connection_id_p) {
+	}
+
+	const std::string ConnectionId() const {
+		return connection_id;
 	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
 private:
-	string sql_query; // FIXME we should not require this to be sent again
-};
-
-class ExecuteResponseMessage : public ProtocolMessage {
-public:
-	static constexpr const MessageType TYPE = MessageType::EXECUTE_RESPONSE;
-
-	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-	ExecuteResponseMessage() : ProtocolMessage(TYPE) {};
-
-	// TODO what does this message do? We return the query handle!!!
+	ConnectionResponseMessage() : ProtocolMessage(TYPE) {
+	}
+	string connection_id;
 };
 
 class FetchRequestMessage : public ProtocolMessage {
 public:
-	static constexpr const MessageType TYPE = MessageType::FETCH_REQUEST;
+	static constexpr MessageType TYPE = MessageType::FETCH_REQUEST;
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-	FetchRequestMessage() : ProtocolMessage(TYPE) {};
+	const std::string ConnectionId() const {
+		return connection_id;
+	}
+	FetchRequestMessage(const string &connection_id_p) : ProtocolMessage(TYPE), connection_id(connection_id_p) {};
+
 	// TODO what was this for again?
 	// TODO contain the query ref
+private:
+	string connection_id;
 };
 
 class FetchResponseMessage : public ProtocolMessage {
 public:
-	static constexpr const MessageType TYPE = MessageType::FETCH_RESPONSE;
+	static constexpr MessageType TYPE = MessageType::FETCH_RESPONSE;
 
 	FetchResponseMessage(unique_ptr<DataChunk> response_data_p)
 	    : ProtocolMessage(TYPE), response_data(std::move(response_data_p)) {};
@@ -151,7 +169,7 @@ private:
 
 class ErrorMessage : public ProtocolMessage {
 public:
-	static constexpr const MessageType TYPE = MessageType::ERROR;
+	static constexpr MessageType TYPE = MessageType::ERROR;
 	ErrorMessage(string error_message_p) : ProtocolMessage(TYPE), error_message(error_message_p) {
 	}
 	const std::string Error() const {
