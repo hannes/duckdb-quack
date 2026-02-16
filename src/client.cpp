@@ -9,13 +9,11 @@ using websocketpp::lib::placeholders::_2;
 static context_ptr on_tls_init_client(const char *hostname, websocketpp::connection_hdl) {
 	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
 	try {
-		// TODO is this required??
 		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
 		                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
-
 		ctx->set_verify_mode(asio::ssl::verify_none);
 	} catch (std::exception &e) {
-		throw InvalidInputException(e.what());
+		throw InternalException(e.what());
 	}
 	return ctx;
 }
@@ -93,7 +91,7 @@ void RpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
 	connection_open = true;
 }
 
-void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
+void RpcClient::OnMessage(const websocketpp::connection_hdl hdl, const message_ptr msg) {
 	auto &payload = msg->get_payload();
 	MemoryStream read_stream((data_ptr_t)payload.data(), payload.size());
 	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
@@ -105,7 +103,7 @@ void RpcClient::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 // boo
 void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	client::connection_ptr con = c.get_con_from_hdl(hdl);
-	// TODO there is more error stuff to expose here if required
+	// there is more error stuff to expose here if required
 	throw InvalidInputException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
 }
 
@@ -132,11 +130,11 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expect
 	return result;
 }
 
-// TODO too much overlap with SendInternal
 void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 	D_ASSERT(message_p);
 	if (mode == WEB_SOCKET) {
 		try {
+			// we have to wait till the connection is actually open on connect
 			while (!connection_open) {
 				usleep(10);
 			}

@@ -10,6 +10,7 @@
 
 namespace duckdb {
 
+typedef websocketpp::connection_hdl connection_ptr;
 typedef websocketpp::config::asio_client::message_type::ptr message_ptr;
 typedef websocketpp::lib::shared_ptr<websocketpp::lib::asio::ssl::context> context_ptr;
 typedef websocketpp::client<websocketpp::config::asio_tls_client> client;
@@ -21,12 +22,13 @@ struct RpcClient {
 
 	~RpcClient();
 
-	void OnOpen(websocketpp::connection_hdl hdl);
-	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
-	void OnFail(websocketpp::connection_hdl hdl);
+	void OnOpen(connection_ptr hdl);
+	void OnMessage(connection_ptr hdl, message_ptr msg);
+	void OnFail(connection_ptr hdl);
 
 	template <class TARGET>
-	unique_ptr<TARGET> WaitForMessage() {
+	unique_ptr<TARGET> MakeRequest(unique_ptr<ProtocolMessage> request_message) {
+		Send(std::move(request_message));
 		auto message = WaitForMessageInternal(TARGET::TYPE).release();
 		return unique_ptr<TARGET>(reinterpret_cast<TARGET *>(message));
 	}

@@ -99,13 +99,13 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 
 	auto &client = RcpcStorageExtensionInfo::GetState(*context.db).FindOrCreateClient(context, uri);
 
-	client.Send(make_uniq<ConnectionRequestMessage>());
-	auto connection_request_response = client.WaitForMessage<ConnectionResponseMessage>();
+	auto connection_request_response =
+	    client.MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
 
 	auto bind_data = make_uniq<RpcTableBindData>(connection_request_response->ConnectionId(), client);
 
-	client.Send(make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
-	auto bind_response = client.WaitForMessage<PrepareResponseMessage>();
+	auto bind_response =
+	    client.MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -124,10 +124,10 @@ static unique_ptr<GlobalTableFunctionState> RpcTableFunInit(ClientContext &conte
 static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
 	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
 	auto &function_state = input.global_state->Cast<RpcTableFunctionState>();
-	bind_data.client.Send(make_uniq<FetchRequestMessage>(bind_data.connection_id));
 
 	if (!function_state.done) {
-		auto fetch_response = bind_data.client.WaitForMessage<FetchResponseMessage>();
+		auto fetch_response =
+		    bind_data.client.MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
 		if (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
 			output.Reference(*fetch_response->ResponseData());
 			output.SetCardinality(fetch_response->ResponseData()->size());
