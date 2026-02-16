@@ -24,7 +24,7 @@ struct RpcServer {
 	void Listen(const string &listen_string);
 
 	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
-	void HandleMessage(ProtocolMessage &received_message, std::function<void(unique_ptr<ProtocolMessage>)> send_fun);
+	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
 
 	ClientContext &context;
 

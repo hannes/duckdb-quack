@@ -120,9 +120,8 @@ static void ListenUnixSocketThread(void *rpc_server_p) {
 		do {
 			try {
 				auto received_message = ProtocolMessage::FromSocket(client_socket_fd);
-				rpc_server->HandleMessage(*received_message, [&](unique_ptr<ProtocolMessage> response_message) -> void {
-					response_message->ToSocket(client_socket_fd);
-				});
+				auto response_message = rpc_server->HandleMessage(*received_message);
+				response_message->ToSocket(client_socket_fd);
 			} catch (IOException e) {
 				open = false;
 			}
@@ -163,14 +162,12 @@ void RpcServer::Listen(const string &listen_string_p) {
 }
 
 // main switcheroo happens here
-void RpcServer::HandleMessage(ProtocolMessage &received_message,
-                              std::function<void(unique_ptr<ProtocolMessage>)> send_fun) {
+unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto connection_request_message = received_message.Cast<ConnectionRequestMessage>();
 		// TODO handle auth here! Only return a connection ID if auth succeeds.
-		send_fun(make_uniq<ConnectionResponseMessage>(CreateNewConnection()));
-		return;
+		return make_uniq<ConnectionResponseMessage>(CreateNewConnection());
 	}
 	case MessageType::PREPARE_REQUEST: {
 		auto prepare_request_message = received_message.Cast<PrepareRequestMessage>();
@@ -178,49 +175,40 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message,
 
 		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
 		if (statement->HasError()) {
-			send_fun(make_uniq<ErrorMessage>(statement->GetError()));
-			return;
+			return make_uniq<ErrorMessage>(statement->GetError());
 		}
 		rpc_connection->duckdb_statement = std::move(statement);
 
-		vector<Value> params; // TODO allow parameters?
+		vector<Value> params; // TODO allow parameters here?
 		auto query_result = rpc_connection->duckdb_statement->PendingQuery(params, true)->Execute();
 
 		if (query_result->HasError()) {
-			send_fun(make_uniq<ErrorMessage>(query_result->GetError()));
-			return;
+			return make_uniq<ErrorMessage>(query_result->GetError());
 		}
 
 		rpc_connection->duckdb_query_result = std::move(query_result);
-		send_fun(make_uniq<PrepareResponseMessage>(rpc_connection->duckdb_statement->GetTypes(),
-		                                           rpc_connection->duckdb_statement->GetNames()));
-		return;
+		return make_uniq<PrepareResponseMessage>(rpc_connection->duckdb_statement->GetTypes(),
+		                                         rpc_connection->duckdb_statement->GetNames());
 	}
 
 	case MessageType::FETCH_REQUEST: {
 		auto fetch_request_message = received_message.Cast<FetchRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(fetch_request_message.ConnectionId());
 		if (!rpc_connection->duckdb_query_result || rpc_connection->duckdb_query_result->HasError()) {
-			send_fun(make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result
-			                                     ? rpc_connection->duckdb_query_result->GetError()
-			                                     : "No query result found"));
-			return;
+			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result
+			                                   ? rpc_connection->duckdb_query_result->GetError()
+			                                   : "No query result found");
 		}
-		// while (true) { // FIXME this just dumps the results on the client without asking for speed
 		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
 
 		if (rpc_connection->duckdb_query_result->HasError()) {
-			send_fun(make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError()));
-			return;
+			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
 		if (!result_chunk || result_chunk->size() == 0) {
-			send_fun(make_uniq<FetchResponseMessage>(nullptr));
-			return;
+			return make_uniq<FetchResponseMessage>(nullptr);
 		}
 		// FIXME send column data collection instead?
-		send_fun(make_uniq<FetchResponseMessage>(std::move(result_chunk)));
-		//}
-		return;
+		return make_uniq<FetchResponseMessage>(std::move(result_chunk));
 	}
 	default: {
 		throw NotImplementedException("Unimplemented message type %s", MessageTypeToString(received_message.Type()));
@@ -230,16 +218,16 @@ void RpcServer::HandleMessage(ProtocolMessage &received_message,
 
 void RpcServer::OnMessage(websocketpp::connection_hdl hdl, message_ptr msg) {
 	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
-	HandleMessage(
-	    *ProtocolMessage::FromMemoryStream(read_stream), [&](unique_ptr<ProtocolMessage> response_message) -> void {
-		    MemoryStream write_stream;
-		    response_message->ToMemoryStream(write_stream);
-		    try {
-			    s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
-		    } catch (websocketpp::exception const &e) {
-			    // TODO we should not fail here but log something
-			    std::cout << "bind reply failed because: "
-			              << "(" << e.what() << ")" << std::endl;
-		    }
-	    });
+	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
+	auto response_message = HandleMessage(*received_message);
+
+	MemoryStream write_stream;
+	response_message->ToMemoryStream(write_stream);
+	try {
+		s.send(hdl, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+	} catch (websocketpp::exception const &e) {
+		// TODO we should not fail here but log something
+		std::cout << "bind reply failed because: "
+		          << "(" << e.what() << ")" << std::endl;
+	}
 }
