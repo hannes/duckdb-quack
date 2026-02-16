@@ -18,18 +18,21 @@ static context_ptr on_tls_init_client(const char *hostname, websocketpp::connect
 	return ctx;
 }
 
-static void ConnectionThread(void *rpc_client_p) {
-	auto rpc_client = (RpcClient *)rpc_client_p;
-	D_ASSERT(rpc_client);
-
+void RpcClient::WebsocketListen() {
 	websocketpp::lib::error_code ec;
-	rpc_client->con = rpc_client->c.get_connection(rpc_client->uri, ec);
+	websocket_connection = websocket_client.get_connection(uri, ec);
 	if (ec) {
 		throw IOException(ec.message());
 	}
 	// actually listen and run event loop
-	rpc_client->c.connect(rpc_client->con);
-	rpc_client->c.run();
+	websocket_client.connect(websocket_connection);
+	websocket_client.run();
+}
+
+static void ConnectionThread(void *rpc_client_p) {
+	auto rpc_client = (RpcClient *)rpc_client_p;
+	D_ASSERT(rpc_client);
+	rpc_client->WebsocketListen();
 }
 
 RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
@@ -41,14 +44,14 @@ RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
 
 	if (mode == WEB_SOCKET) {
 		// some ugly setup
-		c.set_access_channels(websocketpp::log::alevel::none);
-		c.set_error_channels(websocketpp::log::alevel::none);
-		c.init_asio();
-		c.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
-		c.set_user_agent("DuckDB");
-		c.set_message_handler(bind(&RpcClient::OnMessage, this, ::_1, ::_2));
-		c.set_fail_handler(bind(&RpcClient::OnFail, this, ::_1));
-		c.set_open_handler(bind(&RpcClient::OnOpen, this, ::_1));
+		websocket_client.set_access_channels(websocketpp::log::alevel::none);
+		websocket_client.set_error_channels(websocketpp::log::alevel::none);
+		websocket_client.init_asio();
+		websocket_client.set_tls_init_handler(bind(&on_tls_init_client, "localhost", ::_1));
+		websocket_client.set_user_agent("DuckDB");
+		websocket_client.set_message_handler(bind(&RpcClient::OnMessage, this, ::_1, ::_2));
+		websocket_client.set_fail_handler(bind(&RpcClient::OnFail, this, ::_1));
+		websocket_client.set_open_handler(bind(&RpcClient::OnOpen, this, ::_1));
 
 		// launch ze background thread to listen
 		conn_thread = std::thread([=]() {
@@ -58,17 +61,17 @@ RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
 	}
 	if (mode == UNIX_SOCKET) {
 		struct sockaddr_un remote;
-		unix_socket = 0;
+		unix_socket_fd = 0;
 		memset(&remote, 0, sizeof(struct sockaddr_un));
 
-		if ((unix_socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+		if ((unix_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 			throw IOException("Client: Error on socket() call %s", strerror(errno));
 		}
 		remote.sun_family = AF_UNIX;
 		strcpy(remote.sun_path, uri.c_str());
 		auto data_len = SUN_LEN(&remote);
 
-		if (connect(unix_socket, (struct sockaddr *)&remote, data_len)) {
+		if (connect(unix_socket_fd, (struct sockaddr *)&remote, data_len)) {
 			throw IOException("Client: Error on connect(%s) call: %s", (char *)remote.sun_path, strerror(errno));
 		}
 	}
@@ -76,14 +79,14 @@ RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
 
 RpcClient::~RpcClient() {
 	if (mode == WEB_SOCKET) {
-		if (con) {
-			con->close(websocketpp::close::status::normal, "");
+		if (websocket_connection) {
+			websocket_connection->close(websocketpp::close::status::normal, "");
 		}
 		conn_thread.join();
 	}
 	if (mode == UNIX_SOCKET) {
 		// TODO check for errors etc.
-		close(unix_socket);
+		close(unix_socket_fd);
 	}
 }
 
@@ -102,7 +105,7 @@ void RpcClient::OnMessage(const websocketpp::connection_hdl hdl, const message_p
 
 // boo
 void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
-	client::connection_ptr con = c.get_con_from_hdl(hdl);
+	client::connection_ptr con = websocket_client.get_con_from_hdl(hdl);
 	// there is more error stuff to expose here if required
 	throw InvalidInputException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
 }
@@ -116,7 +119,7 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expect
 		messages.pop_back();
 	}
 	if (mode == UNIX_SOCKET) {
-		result = ProtocolMessage::FromSocket(unix_socket);
+		result = ProtocolMessage::FromSocket(unix_socket_fd);
 	}
 	if (result->Type() != expected_type) {
 		if (result->Type() == MessageType::ERROR) {
@@ -141,12 +144,13 @@ void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 
 			MemoryStream write_stream;
 			message_p->ToMemoryStream(write_stream);
-			c.send(con, write_stream.GetData(), write_stream.GetPosition(), websocketpp::frame::opcode::binary);
+			websocket_client.send(websocket_connection, write_stream.GetData(), write_stream.GetPosition(),
+			                      websocketpp::frame::opcode::binary);
 		} catch (websocketpp::exception const &e) {
 			throw IOException(e.what());
 		}
 	}
 	if (mode == UNIX_SOCKET) {
-		message_p->ToSocket(unix_socket);
+		message_p->ToSocket(unix_socket_fd);
 	}
 }

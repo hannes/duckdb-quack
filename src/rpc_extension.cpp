@@ -30,7 +30,7 @@ public:
 	}
 
 	RpcServer &FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
-		std::lock_guard<std::mutex> lock(state_mutex);
+		std::lock_guard<std::mutex> lock(servers_mutex);
 		auto it = servers.find(listen_string);
 		if (it != servers.end()) {
 			return *it->second;
@@ -41,22 +41,9 @@ public:
 		return *servers[listen_string];
 	}
 
-	RpcClient &FindOrCreateClient(ClientContext &context, const std::string &server_address) {
-		std::lock_guard<std::mutex> lock(state_mutex);
-		auto client_key = server_address + '#' + to_string(context.GetConnectionId());
-		auto it = clients.find(client_key);
-		if (it != clients.end()) {
-			return *it->second;
-		}
-		auto client = make_uniq<RpcClient>(server_address);
-		clients.emplace(client_key, std::move(client));
-		return *clients[client_key];
-	}
-
 private:
-	std::mutex state_mutex;
+	std::mutex servers_mutex;
 	unordered_map<string, unique_ptr<RpcServer>> servers;
-	unordered_map<string, unique_ptr<RpcClient>> clients;
 };
 
 inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
@@ -70,13 +57,10 @@ inline void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result
 	result.SetValue(0, StringUtil::Format("Listening on %s", listen_string));
 }
 
-struct RpcTableBindData : FunctionData {
-	explicit RpcTableBindData(const string &connection_id_p, RpcClient &client_p)
-	    : connection_id(connection_id_p), client(client_p) {
-	}
+struct RpcBindData : FunctionData {
+	unique_ptr<RpcClient> client;
 	string connection_id;
-
-	RpcClient &client;
+	string uri;
 
 	bool Equals(const FunctionData &other_p) const override {
 		throw NotImplementedException("Equals not implemented");
@@ -87,25 +71,24 @@ struct RpcTableBindData : FunctionData {
 	}
 };
 
-static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFunctionBindInput &input,
-                                                vector<LogicalType> &return_types, vector<string> &names) {
+static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBindInput &input,
+                                        vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("call_rpc_server URI and query parameters cannot be NULL");
 	}
 
-	auto uri = input.inputs[0].GetValue<string>();
 	auto query = input.inputs[1].GetValue<string>();
-
-	auto &client = RcpcStorageExtensionInfo::GetState(*context.db).FindOrCreateClient(context, uri);
+	auto bind_data = make_uniq<RpcBindData>();
+	bind_data->uri = input.inputs[0].GetValue<string>();
+	bind_data->client = make_uniq<RpcClient>(bind_data->uri);
 
 	auto connection_request_response =
-	    client.MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	    bind_data->client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	bind_data->connection_id = connection_request_response->ConnectionId();
 
-	auto bind_data = make_uniq<RpcTableBindData>(connection_request_response->ConnectionId(), client);
-
-	auto bind_response =
-	    client.MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	auto bind_response = bind_data->client->MakeRequest<PrepareResponseMessage>(
+	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -113,38 +96,74 @@ static unique_ptr<FunctionData> RpcTableBindFun(ClientContext &context, TableFun
 	return bind_data;
 }
 
-struct RpcTableFunctionState : GlobalTableFunctionState {
-	bool done = false;
+struct RpcLocalState : public LocalTableFunctionState {
+	unique_ptr<RpcClient> client;
+
+	explicit RpcLocalState() {
+	}
+	~RpcLocalState() {
+	}
 };
 
-static unique_ptr<GlobalTableFunctionState> RpcTableFunInit(ClientContext &context, TableFunctionInitInput &input) {
-	return make_uniq<RpcTableFunctionState>();
+struct RpcGlobalState : GlobalTableFunctionState {
+	atomic<bool> done;
+	RpcGlobalState() {
+		done = false;
+	}
+};
+
+static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
+	auto &bind_data = bind_data_p->Cast<RpcBindData>();
+	// TODO how do we get ein estimate here? we could get the explain output on the other side??
+	return make_uniq<NodeStatistics>(10000000);
 }
 
-static void RpcTableFun(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
-	auto &bind_data = input.bind_data->Cast<RpcTableBindData>();
-	auto &function_state = input.global_state->Cast<RpcTableFunctionState>();
+unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
+	return make_uniq<RpcGlobalState>();
+}
 
-	if (!function_state.done) {
-		auto fetch_response =
-		    bind_data.client.MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
-		if (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
-			output.Reference(*fetch_response->ResponseData());
-			output.SetCardinality(fetch_response->ResponseData()->size());
-		} else {
-			function_state.done = true;
-		}
+unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
+                                                 GlobalTableFunctionState *global_state_p) {
+	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	auto &global_state = global_state_p->Cast<RpcGlobalState>();
+	if (global_state.done) {
+		return nullptr; // TODO does this work?
 	}
+	auto local_state = make_uniq<RpcLocalState>();
+	local_state->client = make_uniq<RpcClient>(bind_data.uri);
+	// TODO re-use client from bind data for first conn
+
+	return local_state;
+}
+
+static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
+	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	auto &global_state = input.global_state->Cast<RpcGlobalState>();
+	auto &local_state = input.local_state->Cast<RpcLocalState>();
+
+	if (global_state.done) {
+		return;
+	}
+	auto fetch_response =
+	    local_state.client->MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
+	if (!fetch_response->ResponseData() || fetch_response->ResponseData()->size() == 0) {
+		global_state.done = true;
+		return;
+	}
+
+	output.Reference(*fetch_response->ResponseData());
+	output.SetCardinality(fetch_response->ResponseData()->size());
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
-	auto rpc_scalar_function =
-	    ScalarFunction("start_rpc_server", {LogicalType::VARCHAR}, LogicalType::VARCHAR, RpcScalarFun);
+	auto rpc_scalar_function = ScalarFunction("rpc_start", {LogicalType::VARCHAR}, LogicalType::VARCHAR, RpcScalarFun);
 	rpc_scalar_function.stability = FunctionStability::VOLATILE;
 	loader.RegisterFunction(rpc_scalar_function);
 
-	auto rpc_table_function = TableFunction("call_rpc_server", {LogicalType::VARCHAR, LogicalType::VARCHAR},
-	                                        RpcTableFun, RpcTableBindFun, RpcTableFunInit);
+	auto rpc_table_function = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind,
+	                                        RpcInitGlobal, RpcInitLocal);
+	rpc_table_function.cardinality = RpcCardinality;
+
 	loader.RegisterFunction(rpc_table_function);
 
 	// (ab)use storage extension info to store our state

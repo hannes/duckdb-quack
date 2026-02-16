@@ -7,54 +7,55 @@ require rpc
 foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4243'
 
 statement ok con1
-select start_rpc_server(${server});
+select rpc_start(${server});
+
 
 sleep 100 millisecond
 
 query I con2
-from call_rpc_server(${server}, 'select 42')
+from rpc_call(${server}, 'select 42')
 ----
 42
 
 statement error con2
-from call_rpc_server(${server}, '')
+from rpc_call(${server}, '')
 ----
 Error
 
 
 statement error con2
-from call_rpc_server(${server}, 'selexxxct 42')
+from rpc_call(${server}, 'selexxxct 42')
 ----
 Error
 
 query I con2
-select max(range) from call_rpc_server(${server}, 'from range(100000)')
+select max(range) from rpc_call(${server}, 'from range(100000)')
 ----
 99999
 
 
 # some error cases
 statement error con2
-from call_rpc_server(${server}, NULL)
+from rpc_call(${server}, NULL)
 ----
 cannot be NULL
 
 statement error con2
-from call_rpc_server(NULL, '')
+from rpc_call(NULL, '')
 ----
 cannot be NULL
 
 statement error con1
-select start_rpc_server()
+select rpc_start()
 ----
 
 statement error con1
-select start_rpc_server('')
+select rpc_start('')
 ----
 
 # This may be unexpected but oh well
 query I con1
-select start_rpc_server(NULL)
+select rpc_start(NULL)
 ----
 NULL
 

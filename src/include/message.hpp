@@ -51,6 +51,9 @@ public:
 		return message_type;
 	}
 
+	virtual ~ProtocolMessage() {
+	}
+
 protected:
 	ProtocolMessage(MessageType type) : message_type(type) {
 	}

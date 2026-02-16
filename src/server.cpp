@@ -107,26 +107,30 @@ static void ListenUnixSocketThread(RpcServer *rpc_server) {
 
 	while (true) {
 		int client_socket_fd = 0;
-
 		unsigned int sock_len = 0;
 		if ((client_socket_fd = accept(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len)) ==
 		    -1) {
 			continue;
 		}
 
-		// TODO fork off another thread here
-		bool open = true;
-		do {
-			try {
-				auto received_message = ProtocolMessage::FromSocket(client_socket_fd);
-				auto response_message = rpc_server->HandleMessage(*received_message);
-				response_message->ToSocket(client_socket_fd);
-			} catch (IOException) {
-				open = false;
-			}
+		std::thread accept_thread([client_socket_fd, rpc_server] {
+			bool open = true;
+			do {
+				try {
+					auto received_message = ProtocolMessage::FromSocket(client_socket_fd);
+					// printf("S RECV %s\n", MessageTypeToString(received_message->Type()).c_str());
+					auto response_message = rpc_server->HandleMessage(*received_message);
+					// printf("S SEND %s\n", MessageTypeToString(response_message->Type()).c_str());
 
-		} while (open);
-		close(client_socket_fd);
+					response_message->ToSocket(client_socket_fd);
+				} catch (IOException) {
+					open = false;
+				}
+
+			} while (open);
+			close(client_socket_fd);
+		});
+		accept_thread.detach(); // TODO do we need this?
 	}
 }
 
@@ -171,28 +175,26 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	case MessageType::PREPARE_REQUEST: {
 		auto prepare_request_message = received_message.Cast<PrepareRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(prepare_request_message.ConnectionId());
-
+		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
 		if (statement->HasError()) {
 			return make_uniq<ErrorMessage>(statement->GetError());
 		}
-		rpc_connection->duckdb_statement = std::move(statement);
 
 		vector<Value> params; // TODO allow parameters here?
-		auto query_result = rpc_connection->duckdb_statement->PendingQuery(params, true)->Execute();
+		auto query_result = statement->PendingQuery(params, true)->Execute();
 
 		if (query_result->HasError()) {
 			return make_uniq<ErrorMessage>(query_result->GetError());
 		}
-
 		rpc_connection->duckdb_query_result = std::move(query_result);
-		return make_uniq<PrepareResponseMessage>(rpc_connection->duckdb_statement->GetTypes(),
-		                                         rpc_connection->duckdb_statement->GetNames());
+		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames());
 	}
 
 	case MessageType::FETCH_REQUEST: {
 		auto fetch_request_message = received_message.Cast<FetchRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(fetch_request_message.ConnectionId());
+		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		if (!rpc_connection->duckdb_query_result || rpc_connection->duckdb_query_result->HasError()) {
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result
 			                                   ? rpc_connection->duckdb_query_result->GetError()
@@ -201,9 +203,11 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
 
 		if (rpc_connection->duckdb_query_result->HasError()) {
+			rpc_connection->duckdb_query_result.reset();
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
 		if (!result_chunk || result_chunk->size() == 0) {
+			rpc_connection->duckdb_query_result.reset();
 			return make_uniq<FetchResponseMessage>(nullptr);
 		}
 		// FIXME send column data collection instead?

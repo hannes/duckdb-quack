@@ -32,18 +32,18 @@ struct RpcServer {
 
 	std::mutex active_connections_mutex;
 	struct RpcConnection {
+		mutex lock;
 		unique_ptr<Connection> duckdb_connection;
-		unique_ptr<PreparedStatement> duckdb_statement;
 		unique_ptr<QueryResult> duckdb_query_result;
 	};
-	unordered_map<string, RpcConnection> active_connections;
+	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
 
 	// TODO move this to implementation
 	optional_ptr<RpcConnection> GetConnection(const string &connection_id) {
 		std::lock_guard<std::mutex> lock(active_connections_mutex);
 		auto it = active_connections.find(connection_id);
 		if (it != active_connections.end()) {
-			return it->second;
+			return it->second.get();
 		}
 		throw IOException("Invalid connection id");
 	}
@@ -51,10 +51,11 @@ struct RpcServer {
 	string CreateNewConnection() {
 		std::lock_guard<std::mutex> lock(active_connections_mutex);
 		// TODO this will need cryptographic randomness I fear
-		RpcConnection new_connection;
-		new_connection.duckdb_connection = make_uniq<Connection>(*context.db);
 		auto connection_id = StringUtil::GenerateRandomName(40);
 		D_ASSERT(active_connections.find(connection_id) == active_connections.end());
+
+		auto new_connection = make_uniq<RpcConnection>();
+		new_connection->duckdb_connection = make_uniq<Connection>(*context.db);
 		active_connections[connection_id] = std::move(new_connection);
 		return connection_id;
 	}
