@@ -7,14 +7,7 @@
 #include "rpc_start_function.hpp"
 #include "rpc_storage_extension.hpp"
 
-#include "server.hpp"
-#include "client.hpp"
-
-#include "duckdb/common/exception.hpp"
-#include "duckdb/function/scalar_function.hpp"
 #include "duckdb/storage/storage_extension.hpp"
-
-#define ASIO_STANDALONE // no boost!!
 
 namespace duckdb {
 

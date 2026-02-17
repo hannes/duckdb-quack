@@ -5,7 +5,6 @@
 #define ASIO_STANDALONE // no boost!
 
 #include "websocketpp/client.hpp"
-#include "websocketpp/config/asio.hpp"
 #include "websocketpp/config/asio_client.hpp"
 
 namespace duckdb {

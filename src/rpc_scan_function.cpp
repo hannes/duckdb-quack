@@ -6,10 +6,6 @@
 using namespace duckdb;
 
 struct RpcBindData : FunctionData {
-	unique_ptr<RpcClient> client;
-	string connection_id;
-	string uri;
-
 	bool Equals(const FunctionData &other_p) const override {
 		throw NotImplementedException("Equals not implemented");
 	}
@@ -17,6 +13,10 @@ struct RpcBindData : FunctionData {
 	unique_ptr<FunctionData> Copy() const override {
 		throw NotImplementedException("Copy not implemented");
 	}
+	unique_ptr<RpcClient> client;
+	string connection_id;
+	string uri;
+	optional_idx estimated_cardinality;
 };
 
 static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBindInput &input,
@@ -38,6 +38,7 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	auto bind_response = bind_data->client->MakeRequest<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
+	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
@@ -54,17 +55,35 @@ struct RpcLocalState : public LocalTableFunctionState {
 };
 
 struct RpcGlobalState : GlobalTableFunctionState {
-	atomic<bool> done;
-	RpcGlobalState() {
-		done = false;
+	RpcGlobalState(idx_t max_threads_p) : max_threads(max_threads_p), done(false) {
 	}
 	idx_t MaxThreads() const override {
-		return MAX_THREADS; // TODO we might want to only use one thread for low-cardinality queries
+		return max_threads;
 	}
+	idx_t max_threads;
+	atomic<bool> done;
 };
 
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
-	return make_uniq<RpcGlobalState>();
+	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	auto num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
+
+	idx_t max_threads = 1;
+	auto min_chunks_per_thread = 10.0; // TODO make this a parameter
+
+	// small heuristic that scales down the number of threads working on retrieving a result set somewhat gracefully.
+	if (bind_data.estimated_cardinality.IsValid()) {
+		auto target_threads =
+		    (bind_data.estimated_cardinality.GetIndex() / STANDARD_VECTOR_SIZE / min_chunks_per_thread) * num_threads;
+		if (target_threads > 1) {
+			max_threads = target_threads;
+		}
+		if (target_threads > num_threads) {
+			max_threads = GlobalTableFunctionState::MAX_THREADS;
+		}
+	}
+
+	return make_uniq<RpcGlobalState>(max_threads);
 }
 
 unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
@@ -72,7 +91,7 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 	auto &bind_data = input.bind_data->Cast<RpcBindData>();
 	auto &global_state = global_state_p->Cast<RpcGlobalState>();
 	if (global_state.done) {
-		return nullptr; // TODO does this work?
+		return nullptr;
 	}
 	auto local_state = make_uniq<RpcLocalState>();
 	local_state->client = make_uniq<RpcClient>(bind_data.uri);

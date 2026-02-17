@@ -99,6 +99,9 @@ public:
 	const vector<string> &Names() const {
 		return result_names;
 	}
+	const optional_idx EstimatedCardinality() const {
+		return estimated_cardinality;
+	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 

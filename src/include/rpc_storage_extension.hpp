@@ -1,10 +1,9 @@
 #pragma once
 
 #include "duckdb/storage/storage_extension.hpp"
-
+#include "server.hpp"
 namespace duckdb {
 class DatabaseInstance;
-struct RpcServer;
 
 class RcpcStorageExtensionInfo : public StorageExtensionInfo {
 public:
