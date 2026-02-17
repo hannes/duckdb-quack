@@ -35,7 +35,23 @@ select max(range) from rpc_call(${server}, 'from range(100000)')
 
 
 statement ok con2
-from test_all_types() -- haha
+from rpc_call(${server}, 'from test_all_types()')
+
+
+statement ok con2
+from rpc_call(${server}, 'create table fuu(i integer)')
+
+statement ok con2
+from rpc_call(${server}, 'insert into fuu values (42)')
+
+query I ok con2
+from rpc_call(${server}, 'from fuu')
+----
+42
+
+statement ok con2
+from rpc_call(${server}, 'drop table fuu')
+
 
 # some error cases
 statement error con2
