@@ -4,16 +4,16 @@
 
 using namespace duckdb;
 
-RcpcStorageExtensionInfo &RcpcStorageExtensionInfo::GetState(const DatabaseInstance &instance) {
+RpcStorageExtensionInfo &RpcStorageExtensionInfo::GetState(const DatabaseInstance &instance) {
 	auto &config = instance.config;
 	auto ext = StorageExtension::Find(config, STORAGE_EXTENSION_KEY);
 	if (!ext) {
 		throw std::runtime_error("Fatal error: couldn't find rpc extension state.");
 	}
-	return *static_cast<RcpcStorageExtensionInfo *>(ext->storage_info.get());
+	return *static_cast<RpcStorageExtensionInfo *>(ext->storage_info.get());
 }
 
-RpcServer &RcpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
+RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
 	std::lock_guard<std::mutex> lock(servers_mutex);
 	auto it = servers.find(listen_string);
 	if (it != servers.end()) {

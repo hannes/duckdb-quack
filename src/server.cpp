@@ -12,10 +12,11 @@ using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
 static std::string get_password() {
-	throw std::runtime_error("get_password called without a valid password");
+	throw InternalException("get_password called without a valid password");
 }
 
-static context_ptr OnTlsInit(tls_mode mode, websocketpp::connection_hdl hdl) {
+// TLS init gunk...
+static context_ptr OnTlsInit(tls_mode mode, const websocketpp::connection_hdl &hdl) {
 	namespace asio = websocketpp::lib::asio;
 
 	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
@@ -61,10 +62,10 @@ static context_ptr OnTlsInit(tls_mode mode, websocketpp::connection_hdl hdl) {
 		}
 
 		if (SSL_CTX_set_cipher_list(ctx->native_handle(), ciphers.c_str()) != 1) {
-			std::cout << "Error setting cipher list" << std::endl;
+			throw InternalException("Error setting cipher list");
 		}
 	} catch (std::exception &e) {
-		std::cout << "Exception: " << e.what() << std::endl;
+		throw InternalException(e.what());
 	}
 	return ctx;
 }
@@ -107,24 +108,25 @@ static void ListenUnixSocketThread(RpcServer *rpc_server) {
 	}
 
 	while (true) {
-		int client_socket_fd = 0;
 		unsigned int sock_len = 0;
-		if ((client_socket_fd = accept(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len)) ==
-		    -1) {
+		auto client_socket_fd = accept(server_socket_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len);
+		if (client_socket_fd == -1) {
 			continue;
 		}
 
 		std::thread accept_thread([rpc_server, client_socket_fd] {
 			bool open = true;
+			MemoryStream read_stream, write_stream;
+
 			do {
 				try {
-					auto received_message = ProtocolMessage::FromSocket(client_socket_fd);
+					auto received_message = ProtocolMessage::FromSocket(client_socket_fd, read_stream);
 					// printf("S RECV %s\n", MessageTypeToString(received_message->Type()).c_str());
 					auto response_message = rpc_server->HandleMessage(*received_message);
 					// printf("S SEND %s\n", MessageTypeToString(response_message->Type()).c_str());
 
-					response_message->ToSocket(client_socket_fd);
-				} catch (IOException) {
+					response_message->ToSocket(client_socket_fd, write_stream);
+				} catch (IOException &) {
 					open = false;
 				}
 
@@ -136,7 +138,7 @@ static void ListenUnixSocketThread(RpcServer *rpc_server) {
 }
 
 void RpcServer::Listen(const string &listen_string_p) {
-	if (listen_string_p.size() == 0) {
+	if (listen_string_p.empty()) {
 		throw InvalidInputException("Empty listen string specified");
 	}
 	listen_string = listen_string_p;
@@ -246,7 +248,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	}
 }
 
-void RpcServer::OnMessage(const websocketpp::connection_hdl hdl, message_ptr msg) {
+void RpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg) {
 	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
 	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 	auto response_message = HandleMessage(*received_message);

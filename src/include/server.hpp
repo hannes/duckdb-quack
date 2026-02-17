@@ -19,11 +19,11 @@ class ClientContext;
 class ProtocolMessage;
 
 struct RpcServer {
-	RpcServer(ClientContext &context_p);
+	explicit RpcServer(ClientContext &context_p);
 
 	void Listen(const string &listen_string);
 
-	void OnMessage(websocketpp::connection_hdl hdl, message_ptr msg);
+	void OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg);
 	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
 
 	ClientContext &context;

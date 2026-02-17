@@ -42,13 +42,13 @@ unique_ptr<ProtocolMessage> ProtocolMessage::FromMemoryStream(MemoryStream &read
 	return Deserialize(deserializer);
 }
 
-unique_ptr<ProtocolMessage> ProtocolMessage::FromSocket(int fd) {
+unique_ptr<ProtocolMessage> ProtocolMessage::FromSocket(int fd, MemoryStream &read_stream) {
 	idx_t msg_len;
-	MemoryStream read_stream;
 	auto data_recv_header = recv(fd, &msg_len, sizeof(idx_t), MSG_WAITALL);
 	if (data_recv_header != sizeof(idx_t)) {
 		throw IOException("Failed to receive message length: %s", strerror(errno));
 	}
+	read_stream.Rewind();
 	read_stream.GrowCapacity(msg_len);
 
 	auto data_recv_message = recv(fd, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
@@ -58,8 +58,8 @@ unique_ptr<ProtocolMessage> ProtocolMessage::FromSocket(int fd) {
 	return FromMemoryStream(read_stream);
 }
 
-void ProtocolMessage::ToSocket(int fd) const {
-	MemoryStream write_stream;
+void ProtocolMessage::ToSocket(int fd, MemoryStream &write_stream) const {
+	write_stream.Rewind();
 	ToMemoryStream(write_stream);
 
 	idx_t msg_len = write_stream.GetPosition();

@@ -50,12 +50,12 @@ struct RpcLocalState : public LocalTableFunctionState {
 
 	explicit RpcLocalState() {
 	}
-	~RpcLocalState() {
+	~RpcLocalState() override {
 	}
 };
 
 struct RpcGlobalState : GlobalTableFunctionState {
-	RpcGlobalState(idx_t max_threads_p) : max_threads(max_threads_p), done(false) {
+	explicit RpcGlobalState(idx_t max_threads_p) : max_threads(max_threads_p), done(false) {
 	}
 	idx_t MaxThreads() const override {
 		return max_threads;
@@ -69,10 +69,10 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	auto num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
 
 	idx_t max_threads = 1;
-	auto min_chunks_per_thread = 10.0; // TODO make this a parameter
 
 	// small heuristic that scales down the number of threads working on retrieving a result set somewhat gracefully.
 	if (bind_data.estimated_cardinality.IsValid()) {
+		auto min_chunks_per_thread = 10.0; // TODO make this a parameter
 		auto target_threads =
 		    (bind_data.estimated_cardinality.GetIndex() / STANDARD_VECTOR_SIZE / min_chunks_per_thread) * num_threads;
 		if (target_threads > 1) {

@@ -18,7 +18,7 @@ enum Mode { WEB_SOCKET, UNIX_SOCKET };
 
 class RpcClient {
 public:
-	RpcClient(const string &uri_p);
+	explicit RpcClient(const string &uri_p);
 	template <class TARGET>
 	unique_ptr<TARGET> MakeRequest(unique_ptr<ProtocolMessage> request_message) {
 		//	printf("C SEND %s\n", MessageTypeToString(request_message->Type()).c_str());
@@ -34,7 +34,7 @@ public:
 
 private:
 	void OnOpen(connection_ptr hdl);
-	void OnMessage(connection_ptr hdl, message_ptr msg);
+	void OnMessage(const connection_ptr &hdl, message_ptr msg);
 	void OnFail(connection_ptr hdl);
 
 	unique_ptr<ProtocolMessage> WaitForMessageInternal(MessageType expected_type);
@@ -52,5 +52,6 @@ private:
 	bool connection_open = false;
 	Mode mode;
 	int unix_socket_fd;
+	MemoryStream read_stream, write_stream;
 };
 } // namespace duckdb

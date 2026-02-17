@@ -17,8 +17,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// (ab)use storage extension info to store our state
 	auto ext = duckdb::make_shared_ptr<StorageExtension>();
-	ext->storage_info = duckdb::make_uniq<RcpcStorageExtensionInfo>();
-	StorageExtension::Register(loader.GetDatabaseInstance().config, RcpcStorageExtensionInfo::STORAGE_EXTENSION_KEY,
+	ext->storage_info = duckdb::make_uniq<RpcStorageExtensionInfo>();
+	StorageExtension::Register(loader.GetDatabaseInstance().config, RpcStorageExtensionInfo::STORAGE_EXTENSION_KEY,
 	                           ext);
 }
 

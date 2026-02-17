@@ -24,9 +24,9 @@ public:
 	void ToMemoryStream(MemoryStream &write_stream) const;
 	static unique_ptr<ProtocolMessage> FromMemoryStream(MemoryStream &read_stream);
 
-	void ToSocket(int fd) const;
+	void ToSocket(int fd, MemoryStream &write_stream) const;
 
-	static unique_ptr<ProtocolMessage> FromSocket(int fd);
+	static unique_ptr<ProtocolMessage> FromSocket(int fd, MemoryStream &read_stream);
 
 	template <class TARGET>
 	TARGET &Cast() {
@@ -55,7 +55,7 @@ public:
 	}
 
 protected:
-	ProtocolMessage(MessageType type) : message_type(type) {
+	explicit ProtocolMessage(MessageType type) : message_type(type) {
 	}
 	MessageType message_type = MessageType::INVALID;
 };
@@ -67,13 +67,13 @@ public:
 	PrepareRequestMessage(const string &connection_id_p, const string &sql_query_p)
 	    : ProtocolMessage(TYPE), connection_id(connection_id_p), sql_query(sql_query_p) {
 	}
-	const std::string Query() const {
+	const std::string &Query() const {
 		return sql_query;
 	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
-	const std::string ConnectionId() const {
+	const std::string &ConnectionId() const {
 		return connection_id;
 	}
 
@@ -99,7 +99,7 @@ public:
 	const vector<string> &Names() const {
 		return result_names;
 	}
-	const optional_idx EstimatedCardinality() const {
+	optional_idx EstimatedCardinality() const {
 		return estimated_cardinality;
 	}
 	void Serialize(Serializer &serializer) const override;
@@ -126,10 +126,11 @@ class ConnectionResponseMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CONNECTION_RESPONSE;
 
-	ConnectionResponseMessage(const string &connection_id_p) : ProtocolMessage(TYPE), connection_id(connection_id_p) {
+	explicit ConnectionResponseMessage(const string &connection_id_p)
+	    : ProtocolMessage(TYPE), connection_id(connection_id_p) {
 	}
 
-	const std::string ConnectionId() const {
+	const std::string &ConnectionId() const {
 		return connection_id;
 	}
 	void Serialize(Serializer &serializer) const override;
@@ -147,10 +148,11 @@ public:
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-	const std::string ConnectionId() const {
+	const std::string &ConnectionId() const {
 		return connection_id;
 	}
-	FetchRequestMessage(const string &connection_id_p) : ProtocolMessage(TYPE), connection_id(connection_id_p) {};
+	explicit FetchRequestMessage(const string &connection_id_p)
+	    : ProtocolMessage(TYPE), connection_id(connection_id_p) {};
 
 	// TODO what was this for again?
 	// TODO contain the query ref
@@ -162,12 +164,12 @@ class FetchResponseMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::FETCH_RESPONSE;
 
-	FetchResponseMessage(unique_ptr<DataChunk> response_data_p)
+	explicit FetchResponseMessage(unique_ptr<DataChunk> response_data_p)
 	    : ProtocolMessage(TYPE), response_data(std::move(response_data_p)) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-	optional_ptr<DataChunk> ResponseData() {
+	optional_ptr<DataChunk> ResponseData() const {
 		return response_data.get();
 	}
 
@@ -179,9 +181,9 @@ private:
 class ErrorMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::ERROR;
-	ErrorMessage(string error_message_p) : ProtocolMessage(TYPE), error_message(error_message_p) {
+	explicit ErrorMessage(const string &error_message_p) : ProtocolMessage(TYPE), error_message(error_message_p) {
 	}
-	const std::string Error() const {
+	const std::string &Error() const {
 		return error_message;
 	}
 

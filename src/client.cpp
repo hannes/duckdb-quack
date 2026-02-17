@@ -6,7 +6,7 @@ using websocketpp::lib::bind;
 using websocketpp::lib::placeholders::_1;
 using websocketpp::lib::placeholders::_2;
 
-static context_ptr on_tls_init_client(const char *hostname, websocketpp::connection_hdl) {
+static context_ptr on_tls_init_client(const char *, websocketpp::connection_hdl) {
 	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
 	try {
 		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
@@ -29,8 +29,7 @@ void RpcClient::WebsocketListen() {
 	websocket_client.run();
 }
 
-static void ConnectionThread(void *rpc_client_p) {
-	auto rpc_client = (RpcClient *)rpc_client_p;
+static void ConnectionThread(RpcClient *rpc_client) {
 	D_ASSERT(rpc_client);
 	rpc_client->WebsocketListen();
 }
@@ -60,9 +59,9 @@ RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
 		});
 	}
 	if (mode == UNIX_SOCKET) {
-		struct sockaddr_un remote;
+		sockaddr_un remote;
 		unix_socket_fd = 0;
-		memset(&remote, 0, sizeof(struct sockaddr_un));
+		memset(&remote, 0, sizeof(sockaddr_un));
 
 		if ((unix_socket_fd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 			throw IOException("Client: Error on socket() call %s", strerror(errno));
@@ -71,8 +70,8 @@ RpcClient::RpcClient(const string &uri_p) : uri(uri_p) {
 		strcpy(remote.sun_path, uri.c_str());
 		auto data_len = SUN_LEN(&remote);
 
-		if (connect(unix_socket_fd, (struct sockaddr *)&remote, data_len)) {
-			throw IOException("Client: Error on connect(%s) call: %s", (char *)remote.sun_path, strerror(errno));
+		if (connect(unix_socket_fd, reinterpret_cast<sockaddr *>(&remote), data_len)) {
+			throw IOException("Client: Error on connect(%s) call: %s", uri, strerror(errno));
 		}
 	}
 }
@@ -94,10 +93,10 @@ void RpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
 	connection_open = true;
 }
 
-void RpcClient::OnMessage(const websocketpp::connection_hdl hdl, const message_ptr msg) {
+void RpcClient::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr msg) {
 	auto &payload = msg->get_payload();
-	MemoryStream read_stream((data_ptr_t)payload.data(), payload.size());
-	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
+	MemoryStream wss_read_stream((data_ptr_t)payload.data(), payload.size());
+	auto received_message = ProtocolMessage::FromMemoryStream(wss_read_stream);
 	std::unique_lock<std::mutex> lock(messages_mutex);
 	messages.push_front(std::move(received_message));
 	messages_wait.notify_one();
@@ -107,7 +106,7 @@ void RpcClient::OnMessage(const websocketpp::connection_hdl hdl, const message_p
 void RpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	client::connection_ptr con = websocket_client.get_con_from_hdl(hdl);
 	// there is more error stuff to expose here if required
-	throw InvalidInputException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
+	throw IOException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
 }
 
 unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expected_type) {
@@ -119,16 +118,15 @@ unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expect
 		messages.pop_back();
 	}
 	if (mode == UNIX_SOCKET) {
-		result = ProtocolMessage::FromSocket(unix_socket_fd);
+		result = ProtocolMessage::FromSocket(unix_socket_fd, read_stream);
 	}
 	if (result->Type() != expected_type) {
 		if (result->Type() == MessageType::ERROR) {
-			throw InvalidInputException("Expected %s message, got error message instead: %s",
-			                            MessageTypeToString(expected_type),
-			                            result->Cast<ErrorMessage>().Error().c_str());
+			throw IOException("Expected %s message, got error message instead: %s", MessageTypeToString(expected_type),
+			                  result->Cast<ErrorMessage>().Error().c_str());
 		}
-		throw InvalidInputException("Expected %s message, got %s instead", MessageTypeToString(expected_type),
-		                            MessageTypeToString(result->Type()));
+		throw IOException("Expected %s message, got %s instead", MessageTypeToString(expected_type),
+		                  MessageTypeToString(result->Type()));
 	}
 	return result;
 }
@@ -142,7 +140,6 @@ void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 				usleep(10);
 			}
 
-			MemoryStream write_stream;
 			message_p->ToMemoryStream(write_stream);
 			websocket_client.send(websocket_connection, write_stream.GetData(), write_stream.GetPosition(),
 			                      websocketpp::frame::opcode::binary);
@@ -151,6 +148,6 @@ void RpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 		}
 	}
 	if (mode == UNIX_SOCKET) {
-		message_p->ToSocket(unix_socket_fd);
+		message_p->ToSocket(unix_socket_fd, write_stream);
 	}
 }

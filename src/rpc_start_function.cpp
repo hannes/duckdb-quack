@@ -4,14 +4,14 @@
 
 using namespace duckdb;
 
-static void RpcScalarFun(DataChunk &args, ExpressionState &state, Vector &result) {
+static void RpcScalarFun(const DataChunk &args, ExpressionState &state, Vector &result) {
 	D_ASSERT(args.AllConstant());
 	auto listen_value = args.GetValue(0, 0);
 	auto listen_string = listen_value.GetValue<string>();
 	if (listen_value.IsNull() || listen_string.empty()) {
 		throw InvalidInputException("Invalid listen string specified");
 	}
-	auto &rpc_state = RcpcStorageExtensionInfo::GetState(*state.GetContext().db);
+	auto &rpc_state = RpcStorageExtensionInfo::GetState(*state.GetContext().db);
 	rpc_state.FindOrCreateServer(state.GetContext(), listen_string);
 	result.SetValue(0, StringUtil::Format("Listening on %s", listen_string));
 }
