@@ -143,12 +143,14 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
 	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
+	serializer.WriteProperty<optional_idx>(212, "estimated_cardinality", estimated_cardinality);
 }
 
 unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result_types = deserializer.ReadProperty<vector<LogicalType>>(210, "result_types");
 	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
-	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names));
+	auto estimated_cardinality = deserializer.ReadProperty<optional_idx>(212, "estimated_cardinality");
+	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names), estimated_cardinality);
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {

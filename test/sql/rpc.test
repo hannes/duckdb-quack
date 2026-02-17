@@ -51,16 +51,16 @@ cannot be NULL
 statement error con1
 select rpc_start()
 ----
+Binder Error
 
 statement error con1
 select rpc_start('')
 ----
+Invalid listen string
 
-# This may be unexpected but oh well
-query I con1
+statement error con1
 select rpc_start(NULL)
 ----
-NULL
-
+Invalid listen string
 
 endloop

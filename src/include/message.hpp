@@ -87,8 +87,10 @@ private:
 class PrepareResponseMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
-	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p)
-	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p) {};
+	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
+	                       optional_idx estimated_cardinality_p)
+	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p),
+	      estimated_cardinality(estimated_cardinality_p) {};
 
 	const vector<LogicalType> &Types() const {
 		return result_types;
@@ -103,6 +105,7 @@ public:
 private:
 	vector<LogicalType> result_types;
 	vector<string> result_names;
+	optional_idx estimated_cardinality;
 };
 
 // TODO this is where auth goes
