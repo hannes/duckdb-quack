@@ -17,8 +17,29 @@ static std::string GetCertificatePassword() {
 }
 // 1294 default port? seems to be unused
 
+optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id) {
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	auto it = active_connections.find(connection_id);
+	if (it != active_connections.end()) {
+		return it->second.get();
+	}
+	throw IOException("Invalid connection id %s", connection_id);
+}
+
+string RpcServer::CreateNewConnection() {
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+	// TODO this will need cryptographic randomness I fear
+	auto connection_id = StringUtil::GenerateRandomName(40);
+	D_ASSERT(active_connections.find(connection_id) == active_connections.end());
+
+	auto new_connection = make_uniq<RpcConnection>();
+	new_connection->duckdb_connection = make_uniq<Connection>(*db);
+	active_connections[connection_id] = std::move(new_connection);
+	return connection_id;
+}
+
 // TLS init gunk...
-context_ptr RpcServer::OnTlsInit(RpcServer *rpc_server, const websocketpp::connection_hdl &) {
+context_ptr WebsocketRpcServer::OnTlsInit(WebsocketRpcServer *rpc_server, const websocketpp::connection_hdl &) {
 	D_ASSERT(rpc_server);
 	namespace asio = websocketpp::lib::asio;
 
@@ -70,21 +91,27 @@ RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
 }
 
 RpcServer::~RpcServer() {
-	websocket_server.stop();
-	// this should interrupt accept() in the listen thread
-	close(unix_socket_server_fd);
-	unix_socket_keep_listening = false;
 	listen_thread.join();
 }
 
-void RpcServer::WebsocketListenThread(RpcServer *rpc_server) {
+WebsocketRpcServer::~WebsocketRpcServer() {
+	websocket_server.stop();
+}
+
+UnixSocketRpcServer::~UnixSocketRpcServer() {
+	// this should interrupt accept() in the listen thread
+	close(unix_socket_server_fd);
+	unix_socket_keep_listening = false;
+}
+
+void WebsocketRpcServer::WebsocketListenThread(WebsocketRpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
 	rpc_server->websocket_server.start_accept();
 	rpc_server->websocket_server.run();
 }
 
-void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
+void UnixSocketRpcServer::UnixSocketListenThread(UnixSocketRpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
 	while (rpc_server->unix_socket_keep_listening) {
@@ -120,15 +147,50 @@ void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 	unlink(rpc_server->unix_socket_address.sun_path);
 }
 
-void RpcServer::Listen(const string &listen_string_p) {
+void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 	if (listen_string_p.empty()) {
 		throw InvalidInputException("Empty listen string specified");
 	}
+	D_ASSERT(!StringUtil::StartsWith(listen_string_p, "wss:"));
 	listen_string = listen_string_p;
-	if (StringUtil::StartsWith(listen_string, "wss:")) {
+
+	unix_socket_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (unix_socket_server_fd == -1) {
+		throw IOException("Error creating socket");
+	}
+
+	unix_socket_address.sun_family = AF_UNIX;
+	memset(&unix_socket_address, 0, sizeof(sockaddr_un));
+	strncpy(unix_socket_address.sun_path, listen_string.c_str(), sizeof(unix_socket_address.sun_path) - 1);
+
+	auto unlink_result = unlink(unix_socket_address.sun_path);
+	if (unlink_result && errno != ENOENT) {
+		throw IOException("Error cleaning up socket %s: %s", listen_string, strerror(errno));
+	}
+
+	if (bind(unix_socket_server_fd, reinterpret_cast<sockaddr *>(&unix_socket_address),
+	         SUN_LEN(&unix_socket_address)) ||
+	    listen(unix_socket_server_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
+		throw IOException("Error listening to socket %s: %s", listen_string, strerror(errno));
+	}
+
+	unix_socket_keep_listening = true;
+	listen_thread = std::thread([=]() {
+		UnixSocketListenThread(this);
+		return 1;
+	});
+}
+
+void WebsocketRpcServer::Listen(const string &listen_string_p) {
+	if (listen_string_p.empty()) {
+		throw InvalidInputException("Empty listen string specified");
+	}
+	D_ASSERT(StringUtil::StartsWith(listen_string_p, "wss:"));
+	listen_string = listen_string_p;
+	{
 		websocket_server.set_access_channels(websocketpp::log::alevel::none);
-		websocket_server.set_tls_init_handler(bind(&RpcServer::OnTlsInit, this, ::_1));
-		websocket_server.set_message_handler(bind(&RpcServer::OnMessage, this, ::_1, ::_2));
+		websocket_server.set_tls_init_handler(bind(&WebsocketRpcServer::OnTlsInit, this, ::_1));
+		websocket_server.set_message_handler(bind(&WebsocketRpcServer::OnMessage, this, ::_1, ::_2));
 		websocket_server.init_asio();
 
 		// TODO this is overly simplistic but fine for now
@@ -140,32 +202,6 @@ void RpcServer::Listen(const string &listen_string_p) {
 
 		listen_thread = std::thread([=]() {
 			WebsocketListenThread(this);
-			return 1;
-		});
-	} else {
-		unix_socket_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-		if (unix_socket_server_fd == -1) {
-			throw IOException("Error creating socket");
-		}
-
-		unix_socket_address.sun_family = AF_UNIX;
-		memset(&unix_socket_address, 0, sizeof(sockaddr_un));
-		strncpy(unix_socket_address.sun_path, listen_string.c_str(), sizeof(unix_socket_address.sun_path) - 1);
-
-		auto unlink_result = unlink(unix_socket_address.sun_path);
-		if (unlink_result && errno != ENOENT) {
-			throw IOException("Error cleaning up socket %s: %s", listen_string, strerror(errno));
-		}
-
-		if (bind(unix_socket_server_fd, reinterpret_cast<sockaddr *>(&unix_socket_address),
-		         SUN_LEN(&unix_socket_address)) ||
-		    listen(unix_socket_server_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
-			throw IOException("Error listening to socket %s: %s", listen_string, strerror(errno));
-		}
-
-		unix_socket_keep_listening = true;
-		listen_thread = std::thread([=]() {
-			UnixSocketListenThread(this);
 			return 1;
 		});
 	}
@@ -252,7 +288,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	}
 }
 
-void RpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg) {
+void WebsocketRpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_ptr &msg) {
 	MemoryStream read_stream((data_ptr_t)msg->get_payload().data(), msg.get()->get_payload().size());
 	auto received_message = ProtocolMessage::FromMemoryStream(read_stream);
 	auto response_message = HandleMessage(*received_message);
@@ -267,25 +303,4 @@ void RpcServer::OnMessage(const websocketpp::connection_hdl &hdl, const message_
 		std::cout << "sending reply failed because: "
 		          << "(" << e.what() << ")" << std::endl;
 	}
-}
-
-optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id) {
-	std::lock_guard<std::mutex> lock(active_connections_mutex);
-	auto it = active_connections.find(connection_id);
-	if (it != active_connections.end()) {
-		return it->second.get();
-	}
-	throw IOException("Invalid connection id %s", connection_id);
-}
-
-string RpcServer::CreateNewConnection() {
-	std::lock_guard<std::mutex> lock(active_connections_mutex);
-	// TODO this will need cryptographic randomness I fear
-	auto connection_id = StringUtil::GenerateRandomName(40);
-	D_ASSERT(active_connections.find(connection_id) == active_connections.end());
-
-	auto new_connection = make_uniq<RpcConnection>();
-	new_connection->duckdb_connection = make_uniq<Connection>(*db);
-	active_connections[connection_id] = std::move(new_connection);
-	return connection_id;
 }
