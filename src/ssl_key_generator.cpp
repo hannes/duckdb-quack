@@ -97,7 +97,7 @@ void SslKeyGenerator::GenerateSslKeys(const std::string &cert_filename, const st
 		std::unique_ptr<BIO, void (*)(BIO *)> cert_file {create_bio(cert_filename), BIO_free_all};
 		if (!PEM_write_bio_X509(cert_file.get(), cert.get())) {
 			throw std::runtime_error("Error serializing certificate");
-		};
+		}
 	}
 
 	{

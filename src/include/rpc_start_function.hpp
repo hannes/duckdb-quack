@@ -2,15 +2,15 @@
 
 namespace duckdb {
 
-class ScalarFunction;
+class TableFunction;
 
 class RpcStartFunction {
 public:
-	static ScalarFunction GetFunction();
+	static TableFunction GetFunction();
 };
 
 class RpcGenerateKeysFunction {
 public:
-	static ScalarFunction GetFunction();
+	static TableFunction GetFunction();
 };
 } // namespace duckdb

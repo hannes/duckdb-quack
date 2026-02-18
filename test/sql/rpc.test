@@ -5,12 +5,12 @@
 require rpc
 
 statement ok
-select rpc_generate_keys();
+call rpc_generate_keys();
 
 foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4243'
 
 statement ok con1
-select rpc_start(${server});
+call rpc_start(${server});
 
 
 sleep 100 millisecond
@@ -68,17 +68,17 @@ from rpc_call(NULL, '')
 cannot be NULL
 
 statement error con1
-select rpc_start()
+call rpc_start()
 ----
 Binder Error
 
 statement error con1
-select rpc_start('')
+call rpc_start('')
 ----
 Invalid listen string
 
 statement error con1
-select rpc_start(NULL)
+call rpc_start(NULL)
 ----
 Invalid listen string
 
