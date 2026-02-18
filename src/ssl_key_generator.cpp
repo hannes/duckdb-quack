@@ -83,11 +83,9 @@ void SslKeyGenerator::GenerateSslKeys(const std::string &cert_filename, const st
 		X509_gmtime_adj(X509_get_notAfter(cert.get()), cert_days_valid * 24 * 3600);
 		X509_name_st *name = X509_get_subject_name(cert.get());
 
-		// TODO do we need this other stuff?
-		// const unsigned char country[] = "RU";
-		// const unsigned char company[] = "MyCompany, PLC";
 		const unsigned char common_name[] = "localhost";
 
+		// TODO do we need this other stuff?
 		// X509_NAME_add_entry_by_txt(name, "C", MBSTRING_ASC, country, -1, -1, 0);
 		// X509_NAME_add_entry_by_txt(name, "O", MBSTRING_ASC, company, -1, -1, 0);
 		X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, common_name, -1, -1, 0);
@@ -96,10 +94,9 @@ void SslKeyGenerator::GenerateSslKeys(const std::string &cert_filename, const st
 		    X509_sign(cert.get(), rsa.get(), EVP_sha256()) == 0) {
 			throw std::runtime_error("Error creating certificate");
 		}
-		// PEM_write_X509();
 		std::unique_ptr<BIO, void (*)(BIO *)> cert_file {create_bio(cert_filename), BIO_free_all};
-
 		if (!PEM_write_bio_X509(cert_file.get(), cert.get())) {
+			throw std::runtime_error("Error serializing certificate");
 		};
 	}
 
