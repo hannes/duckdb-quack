@@ -55,8 +55,10 @@ private:
 	mutex active_connections_mutex;
 	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
 	std::thread listen_thread;
+
 	server websocket_server;
 	int unix_socket_server_fd;
+	sockaddr_un unix_socket_address;
 	bool unix_socket_keep_listening;
 };
 } // namespace duckdb

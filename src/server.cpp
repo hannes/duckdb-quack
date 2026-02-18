@@ -87,32 +87,10 @@ void RpcServer::WebsocketListenThread(RpcServer *rpc_server) {
 void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 	D_ASSERT(rpc_server);
 
-	rpc_server->unix_socket_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (rpc_server->unix_socket_server_fd == -1) {
-		throw IOException("Error creating socket");
-	}
-
-	sockaddr_un socket_address;
-	socket_address.sun_family = AF_UNIX;
-	memset(&socket_address, 0, sizeof(sockaddr_un));
-	strncpy(socket_address.sun_path, rpc_server->listen_string.c_str(), sizeof(socket_address.sun_path) - 1);
-
-	auto unlink_result = unlink(socket_address.sun_path);
-	if (unlink_result && errno != ENOENT) {
-		throw IOException("Error cleaning up socket %s: %s", rpc_server->listen_string, strerror(errno));
-	}
-
-	if (bind(rpc_server->unix_socket_server_fd, reinterpret_cast<sockaddr *>(&socket_address),
-	         SUN_LEN(&socket_address)) ||
-	    listen(rpc_server->unix_socket_server_fd,
-	           100 /* TODO: magic constant for connect queue length, should be fine */)) {
-		throw IOException("Error listening to socket %s: %s", rpc_server->listen_string, strerror(errno));
-	}
-
 	while (rpc_server->unix_socket_keep_listening) {
 		unsigned int sock_len = 0;
-		auto client_socket_fd =
-		    accept(rpc_server->unix_socket_server_fd, reinterpret_cast<sockaddr *>(&socket_address), &sock_len);
+		auto client_socket_fd = accept(rpc_server->unix_socket_server_fd,
+		                               reinterpret_cast<sockaddr *>(&rpc_server->unix_socket_address), &sock_len);
 		if (client_socket_fd == -1) {
 			continue;
 		}
@@ -138,6 +116,8 @@ void RpcServer::UnixSocketListenThread(RpcServer *rpc_server) {
 		});
 		accept_thread.detach(); // TODO do we need this?
 	}
+	// clean up this unix socket, but we don't care if this fails
+	unlink(rpc_server->unix_socket_address.sun_path);
 }
 
 void RpcServer::Listen(const string &listen_string_p) {
@@ -163,6 +143,26 @@ void RpcServer::Listen(const string &listen_string_p) {
 			return 1;
 		});
 	} else {
+		unix_socket_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+		if (unix_socket_server_fd == -1) {
+			throw IOException("Error creating socket");
+		}
+
+		unix_socket_address.sun_family = AF_UNIX;
+		memset(&unix_socket_address, 0, sizeof(sockaddr_un));
+		strncpy(unix_socket_address.sun_path, listen_string.c_str(), sizeof(unix_socket_address.sun_path) - 1);
+
+		auto unlink_result = unlink(unix_socket_address.sun_path);
+		if (unlink_result && errno != ENOENT) {
+			throw IOException("Error cleaning up socket %s: %s", listen_string, strerror(errno));
+		}
+
+		if (bind(unix_socket_server_fd, reinterpret_cast<sockaddr *>(&unix_socket_address),
+		         SUN_LEN(&unix_socket_address)) ||
+		    listen(unix_socket_server_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
+			throw IOException("Error listening to socket %s: %s", listen_string, strerror(errno));
+		}
+
 		unix_socket_keep_listening = true;
 		listen_thread = std::thread([=]() {
 			UnixSocketListenThread(this);
