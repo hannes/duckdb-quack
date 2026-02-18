@@ -91,7 +91,10 @@ RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
 }
 
 RpcServer::~RpcServer() {
-	listen_thread.join();
+	try {
+		listen_thread.join();
+	} catch (std::exception &) {
+	}
 }
 
 WebsocketRpcServer::~WebsocketRpcServer() {

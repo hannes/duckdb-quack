@@ -34,9 +34,7 @@ class RpcServer {
 public:
 	explicit RpcServer(ClientContext &context_p);
 	// TODO should listen be part of the constructor?
-	virtual void Listen(const string &listen_string) {
-		throw NotImplementedException("Listen not implemented");
-	};
+	virtual void Listen(const string &listen_string) {};
 
 	optional_ptr<RpcConnection> GetConnection(const string &connection_id);
 	string CreateNewConnection();

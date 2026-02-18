@@ -19,7 +19,13 @@ RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, c
 	if (it != servers.end()) {
 		return *it->second;
 	}
-	auto server = make_uniq<RpcServer>(context);
+	unique_ptr<RpcServer> server;
+	if (StringUtil::StartsWith(listen_string, "wss://")) {
+		server = make_uniq<WebsocketRpcServer>(context);
+
+	} else {
+		server = make_uniq<UnixSocketRpcServer>(context);
+	}
 	server->Listen(listen_string);
 	servers.emplace(listen_string, std::move(server));
 	return *servers[listen_string];
