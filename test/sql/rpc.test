@@ -7,7 +7,7 @@ require rpc
 statement ok
 call rpc_generate_keys();
 
-foreach server '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:4243'
+foreach server 'wss://localhost:4243' '__TEST_DIR__/duckdb-rpc-socket'
 
 statement ok con1
 call rpc_start(${server});
@@ -81,5 +81,21 @@ statement error con1
 call rpc_start(NULL)
 ----
 Invalid listen string
+
+
+statement ok con2
+from rpc_call(${server}, 'select 42')
+
+statement ok con 1
+call rpc_stop(${server})
+
+statement ok con 1
+call rpc_stop(${server})
+
+
+statement error con2
+from rpc_call(${server}, 'select 42')
+----
+IO Error
 
 endloop

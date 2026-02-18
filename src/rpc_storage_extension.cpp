@@ -30,3 +30,13 @@ RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, c
 	servers.emplace(listen_string, std::move(server));
 	return *servers[listen_string];
 }
+
+bool RpcStorageExtensionInfo::StopServer(ClientContext &context, const std::string &listen_string) {
+	std::lock_guard<std::mutex> lock(servers_mutex);
+	const auto it = servers.find(listen_string);
+	if (it == servers.end()) {
+		return false;
+	}
+	servers.erase(it);
+	return true;
+}

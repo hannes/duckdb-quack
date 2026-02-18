@@ -9,6 +9,11 @@ public:
 	static TableFunction GetFunction();
 };
 
+class RpcStopFunction {
+public:
+	static TableFunction GetFunction();
+};
+
 class RpcGenerateKeysFunction {
 public:
 	static TableFunction GetFunction();

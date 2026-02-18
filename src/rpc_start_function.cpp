@@ -7,17 +7,17 @@
 
 using namespace duckdb;
 
-struct RpcStartFunctionData : public TableFunctionData {
-	RpcStartFunctionData() {
+struct RpcStartStopFunctionData : public TableFunctionData {
+	RpcStartStopFunctionData() {
 	}
 
 	bool finished = false;
 	string listen_string;
 };
 
-static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFunctionBindInput &input,
-                                             vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<RpcStartFunctionData>();
+static unique_ptr<FunctionData> RpcStartStopBind(ClientContext &context, TableFunctionBindInput &input,
+                                                 vector<LogicalType> &return_types, vector<string> &names) {
+	auto result = make_uniq<RpcStartStopFunctionData>();
 	auto &uri_value = input.inputs[0];
 	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
 		throw InvalidInputException("Invalid listen string specified");
@@ -29,7 +29,7 @@ static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFuncti
 }
 
 static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &bind_data = data_p.bind_data->CastNoConst<RpcStartFunctionData>();
+	auto &bind_data = data_p.bind_data->CastNoConst<RpcStartStopFunctionData>();
 	if (bind_data.finished) {
 		return;
 	}
@@ -42,7 +42,26 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 
 TableFunction RpcStartFunction::GetFunction() {
 	// TODO add a named parameter to specify where the keys are
-	return TableFunction("rpc_start", {LogicalType::VARCHAR}, RpcStartFun, RpcStartBind);
+	return TableFunction("rpc_start", {LogicalType::VARCHAR}, RpcStartFun, RpcStartStopBind);
+}
+
+static void RpcStopFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind_data = data_p.bind_data->CastNoConst<RpcStartStopFunctionData>();
+	if (bind_data.finished) {
+		return;
+	}
+	auto &rpc_state = RpcStorageExtensionInfo::GetState(*context.db);
+	if (rpc_state.StopServer(context, bind_data.listen_string)) {
+		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_string));
+	} else {
+		output.data[0].SetValue(0, StringUtil::Format("No server found listening on %s", bind_data.listen_string));
+	}
+	output.SetCardinality(1);
+	bind_data.finished = true;
+}
+
+TableFunction RpcStopFunction::GetFunction() {
+	return TableFunction("rpc_stop", {LogicalType::VARCHAR}, RpcStopFun, RpcStartStopBind);
 }
 
 struct RpcGenerateKeysFunctionData : public TableFunctionData {

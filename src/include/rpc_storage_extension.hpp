@@ -10,6 +10,8 @@ public:
 	static RpcStorageExtensionInfo &GetState(const DatabaseInstance &instance);
 
 	RpcServer &FindOrCreateServer(ClientContext &context, const std::string &listen_string);
+	bool StopServer(ClientContext &context, const std::string &listen_string);
+
 	static constexpr const char *STORAGE_EXTENSION_KEY = "rpc";
 
 private:

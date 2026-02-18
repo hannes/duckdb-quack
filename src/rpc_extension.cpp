@@ -14,6 +14,8 @@ namespace duckdb {
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(RpcScanFunction::GetFunction());
 	loader.RegisterFunction(RpcStartFunction::GetFunction());
+	loader.RegisterFunction(RpcStopFunction::GetFunction());
+
 	loader.RegisterFunction(RpcGenerateKeysFunction::GetFunction());
 
 	// (ab)use storage extension info to store our state

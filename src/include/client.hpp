@@ -63,10 +63,6 @@ public:
 private:
 	void Send(unique_ptr<ProtocolMessage> message_p) override;
 	unique_ptr<ProtocolMessage> Receive() override;
-
-	void WebsocketListen();
-	static void ConnectionThread(WebSocketRpcClient *rpc_client);
-
 	void OnOpen(connection_ptr hdl);
 	void OnMessage(const connection_ptr &hdl, message_ptr msg);
 	void OnFail(connection_ptr hdl);
@@ -80,6 +76,7 @@ private:
 	client websocket_client;
 	client::connection_ptr websocket_connection;
 	bool connection_open = false;
+	std::string websocket_exception;
 };
 
 } // namespace duckdb

@@ -146,8 +146,7 @@ void UnixSocketRpcServer::UnixSocketListenThread(UnixSocketRpcServer *rpc_server
 		});
 		accept_thread.detach(); // TODO do we need this?
 	}
-	// clean up this unix socket, but we don't care if this fails
-	unlink(rpc_server->unix_socket_address.sun_path);
+	// TODO clean up socket?
 }
 
 void UnixSocketRpcServer::Listen(const string &listen_string_p) {
@@ -178,7 +177,8 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 	}
 
 	unix_socket_keep_listening = true;
-	listen_thread = std::thread([=]() {
+
+	listen_thread = std::thread([this]() {
 		UnixSocketListenThread(this);
 		return 1;
 	});

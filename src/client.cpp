@@ -2,36 +2,17 @@
 
 using namespace duckdb;
 
-using websocketpp::lib::bind;
-using websocketpp::lib::placeholders::_1;
-using websocketpp::lib::placeholders::_2;
-
-static context_ptr on_tls_init_client(const char *, websocketpp::connection_hdl) {
-	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
-	try {
-		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
-		                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
-		ctx->set_verify_mode(asio::ssl::verify_none);
-	} catch (std::exception &e) {
-		throw InternalException(e.what());
+unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expected_type) {
+	auto result = Receive();
+	if (result->Type() != expected_type) {
+		if (result->Type() == MessageType::ERROR) {
+			throw IOException("Expected %s message, got error message instead: %s", MessageTypeToString(expected_type),
+			                  result->Cast<ErrorMessage>().Error().c_str());
+		}
+		throw IOException("Expected %s message, got %s instead", MessageTypeToString(expected_type),
+		                  MessageTypeToString(result->Type()));
 	}
-	return ctx;
-}
-
-void WebSocketRpcClient::WebsocketListen() {
-	websocketpp::lib::error_code ec;
-	websocket_connection = websocket_client.get_connection(uri, ec);
-	if (ec) {
-		throw IOException(ec.message());
-	}
-	// actually listen and run event loop
-	websocket_client.connect(websocket_connection);
-	websocket_client.run();
-}
-
-void WebSocketRpcClient::ConnectionThread(WebSocketRpcClient *rpc_client) {
-	D_ASSERT(rpc_client);
-	rpc_client->WebsocketListen();
+	return result;
 }
 
 UnixSocketRpcClient::UnixSocketRpcClient(const string &uri_p) : RpcClient(uri_p) {
@@ -53,6 +34,35 @@ UnixSocketRpcClient::UnixSocketRpcClient(const string &uri_p) : RpcClient(uri_p)
 	}
 }
 
+UnixSocketRpcClient::~UnixSocketRpcClient() {
+	close(unix_socket_fd);
+}
+
+unique_ptr<ProtocolMessage> UnixSocketRpcClient::Receive() {
+	return ProtocolMessage::FromSocket(unix_socket_fd, read_stream);
+}
+
+void UnixSocketRpcClient::Send(unique_ptr<ProtocolMessage> message) {
+	D_ASSERT(message);
+	message->ToSocket(unix_socket_fd, write_stream);
+}
+
+using websocketpp::lib::bind;
+using websocketpp::lib::placeholders::_1;
+using websocketpp::lib::placeholders::_2;
+
+static context_ptr on_tls_init_client(const char *, websocketpp::connection_hdl) {
+	context_ptr ctx = websocketpp::lib::make_shared<asio::ssl::context>(asio::ssl::context::sslv23);
+	try {
+		ctx->set_options(asio::ssl::context::default_workarounds | asio::ssl::context::no_sslv2 |
+		                 asio::ssl::context::no_sslv3 | asio::ssl::context::single_dh_use);
+		ctx->set_verify_mode(asio::ssl::verify_none);
+	} catch (std::exception &e) {
+		throw InternalException(e.what());
+	}
+	return ctx;
+}
+
 WebSocketRpcClient::WebSocketRpcClient(const string &uri_p) : RpcClient(uri_p) {
 	D_ASSERT(StringUtil::StartsWith(uri, "wss://"));
 
@@ -66,22 +76,22 @@ WebSocketRpcClient::WebSocketRpcClient(const string &uri_p) : RpcClient(uri_p) {
 	websocket_client.set_fail_handler(bind(&WebSocketRpcClient::OnFail, this, ::_1));
 	websocket_client.set_open_handler(bind(&WebSocketRpcClient::OnOpen, this, ::_1));
 
+	websocketpp::lib::error_code ec;
+	websocket_connection = websocket_client.get_connection(uri, ec);
+	if (ec) {
+		throw IOException(ec.message());
+	}
+	websocket_client.connect(websocket_connection);
+
 	// launch ze background thread to listen
-	websocket_listen_thread = std::thread([=]() {
-		ConnectionThread(this);
-		return 1;
-	});
+	websocket_listen_thread = std::thread([=]() { websocket_client.run(); });
 }
 
 WebSocketRpcClient::~WebSocketRpcClient() {
-	if (websocket_connection) {
+	if (websocket_connection && websocket_exception.empty()) {
 		websocket_connection->close(websocketpp::close::status::normal, "");
 	}
 	websocket_listen_thread.join();
-}
-
-UnixSocketRpcClient::~UnixSocketRpcClient() {
-	close(unix_socket_fd);
 }
 
 void WebSocketRpcClient::OnOpen(websocketpp::connection_hdl hdl_p) {
@@ -101,14 +111,13 @@ void WebSocketRpcClient::OnMessage(const websocketpp::connection_hdl &hdl, const
 void WebSocketRpcClient::OnFail(websocketpp::connection_hdl hdl) {
 	client::connection_ptr con = websocket_client.get_con_from_hdl(hdl);
 	// there is more error stuff to expose here if required
-	throw IOException("RPC request to %s failed: %s", uri, con->get_ec().message().c_str());
-}
-
-unique_ptr<ProtocolMessage> UnixSocketRpcClient::Receive() {
-	return ProtocolMessage::FromSocket(unix_socket_fd, read_stream);
+	websocket_exception = StringUtil::Format("RPC request to %s failed: %s", uri, con->get_ec().message());
 }
 
 unique_ptr<ProtocolMessage> WebSocketRpcClient::Receive() {
+	if (!websocket_exception.empty()) {
+		throw IOException(websocket_exception);
+	}
 	unique_ptr<ProtocolMessage> result;
 	std::unique_lock<std::mutex> lock(messages_mutex);
 	messages_wait.wait(lock, [=] { return !messages.empty(); });
@@ -117,32 +126,17 @@ unique_ptr<ProtocolMessage> WebSocketRpcClient::Receive() {
 	return result;
 }
 
-unique_ptr<ProtocolMessage> RpcClient::WaitForMessageInternal(MessageType expected_type) {
-	auto result = Receive();
-	if (result->Type() != expected_type) {
-		if (result->Type() == MessageType::ERROR) {
-			throw IOException("Expected %s message, got error message instead: %s", MessageTypeToString(expected_type),
-			                  result->Cast<ErrorMessage>().Error().c_str());
-		}
-		throw IOException("Expected %s message, got %s instead", MessageTypeToString(expected_type),
-		                  MessageTypeToString(result->Type()));
-	}
-	return result;
-}
-
-void UnixSocketRpcClient::Send(unique_ptr<ProtocolMessage> message) {
-	D_ASSERT(message);
-	message->ToSocket(unix_socket_fd, write_stream);
-}
-
 void WebSocketRpcClient::Send(unique_ptr<ProtocolMessage> message_p) {
 	D_ASSERT(message_p);
 	try {
 		// we have to wait till the connection is actually open on connect
-		while (!connection_open) {
+		while (!connection_open && websocket_exception.empty()) {
 			usleep(10);
 		}
 
+		if (!websocket_exception.empty()) {
+			throw IOException(websocket_exception);
+		}
 		message_p->ToMemoryStream(write_stream);
 		websocket_client.send(websocket_connection, write_stream.GetData(), write_stream.GetPosition(),
 		                      websocketpp::frame::opcode::binary);
