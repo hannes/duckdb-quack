@@ -172,6 +172,7 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 
 	if (bind(unix_socket_server_fd, reinterpret_cast<sockaddr *>(&unix_socket_address),
 	         SUN_LEN(&unix_socket_address)) ||
+	    chmod(listen_string_p.c_str(), S_IWUSR | S_IRUSR) ||
 	    listen(unix_socket_server_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
 		throw IOException("Error listening to socket %s: %s", listen_string, strerror(errno));
 	}
