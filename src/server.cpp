@@ -178,11 +178,7 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 	}
 
 	unix_socket_keep_listening = true;
-
-	listen_thread = std::thread([this]() {
-		UnixSocketListenThread(this);
-		return 1;
-	});
+	listen_thread = std::thread(UnixSocketListenThread, this);
 }
 
 void WebSocketRpcServer::Listen(const string &listen_string_p) {
@@ -204,10 +200,7 @@ void WebSocketRpcServer::Listen(const string &listen_string_p) {
 		}
 		websocket_server.listen(listen_port);
 
-		listen_thread = std::thread([=]() {
-			WebsocketListenThread(this);
-			return 1;
-		});
+		listen_thread = std::thread(WebsocketListenThread, this);
 	}
 }
 

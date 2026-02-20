@@ -18,16 +18,19 @@ static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_
 	return make_uniq<RpcCatalog>(db, info.path);
 }
 
+static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
+                                                                  AttachedDatabase &db, Catalog &catalog) {
+	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
+	return make_uniq<RpcTransactionManager>(db, rpc_catalog);
+}
+
 class RpcStorageExtension : public StorageExtension {
 public:
 	RpcStorageExtension() {
 		attach = RpcAttach;
-		// TODO do we need this?
-		//create_transaction_manager = SQLiteCreateTransactionManager;
+		create_transaction_manager = RpcCreateTransactionManager;
 	}
 };
-
-
 
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(RpcScanFunction::GetFunction());

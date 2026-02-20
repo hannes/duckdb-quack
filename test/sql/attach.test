@@ -1,0 +1,37 @@
+# name: test/sql/attach.test
+# description: test rpc extension
+# group: [sql]
+
+require rpc
+
+statement ok
+create table fuu as values(42);
+
+statement ok
+call rpc_generate_keys();
+
+foreach server  '__TEST_DIR__/duckdb-rpc-socket'
+
+statement ok con1
+call rpc_start(${server});
+
+query I con2
+from rpc_call(${server}, 'select 42')
+----
+42
+
+statement ok con2
+attach ${server} as rpc (TYPE rpc)
+
+query I
+from rpc.fuu;
+----
+42
+
+statement ok con2
+detach rpc;
+
+statement ok con1
+call rpc_stop(${server});
+
+endloop
