@@ -8,8 +8,26 @@
 #include "rpc_storage_extension.hpp"
 
 #include "duckdb/storage/storage_extension.hpp"
+#include "catalog.hpp"
 
 namespace duckdb {
+
+static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
+                                     AttachedDatabase &db, const string &name, AttachInfo &info,
+                                     AttachOptions &attach_options) {
+	return make_uniq<RpcCatalog>(db, info.path);
+}
+
+class RpcStorageExtension : public StorageExtension {
+public:
+	RpcStorageExtension() {
+		attach = RpcAttach;
+		// TODO do we need this?
+		//create_transaction_manager = SQLiteCreateTransactionManager;
+	}
+};
+
+
 
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(RpcScanFunction::GetFunction());
@@ -19,7 +37,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(RpcGenerateKeysFunction::GetFunction());
 
 	// (ab)use storage extension info to store our state
-	auto ext = duckdb::make_shared_ptr<StorageExtension>();
+	auto ext = duckdb::make_shared_ptr<RpcStorageExtension>();
 	ext->storage_info = duckdb::make_uniq<RpcStorageExtensionInfo>();
 	StorageExtension::Register(loader.GetDatabaseInstance().config, RpcStorageExtensionInfo::STORAGE_EXTENSION_KEY,
 	                           ext);
