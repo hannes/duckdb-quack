@@ -23,10 +23,12 @@ class Connection;
 class MemoryStream;
 class QueryResult;
 class DatabaseInstance;
+class PreparedStatement;
 
 struct RpcConnection {
 	mutex lock;
 	unique_ptr<Connection> duckdb_connection;
+	//	unordered_map<string, std::pair<unique_ptr<PreparedStatement>, unique_ptr<QueryResult>>> duckdb_statements;
 	unique_ptr<QueryResult> duckdb_query_result;
 };
 

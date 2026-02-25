@@ -64,8 +64,9 @@ class PrepareRequestMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_REQUEST;
 
-	PrepareRequestMessage(const string &connection_id_p, const string &sql_query_p)
-	    : ProtocolMessage(TYPE), connection_id(connection_id_p), sql_query(sql_query_p) {
+	PrepareRequestMessage(const string &connection_id_p, const string &sql_query_p, bool immediately_execute_p = false)
+	    : ProtocolMessage(TYPE), connection_id(connection_id_p), sql_query(sql_query_p),
+	      immediately_execute(immediately_execute_p) {
 	}
 	const std::string &Query() const {
 		return sql_query;
@@ -77,9 +78,14 @@ public:
 		return connection_id;
 	}
 
+	bool ImmediatelyExecute() const {
+		return immediately_execute;
+	}
+
 private:
 	string connection_id; // FIXME abstract this to some superclass
 	string sql_query;
+	bool immediately_execute;
 
 	PrepareRequestMessage() : ProtocolMessage(TYPE) {};
 };

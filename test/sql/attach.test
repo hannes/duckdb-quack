@@ -5,7 +5,7 @@
 require rpc
 
 statement ok
-create table fuu as values(42);
+create table fuu as values(42, 43);
 
 statement ok
 call rpc_generate_keys();
@@ -15,18 +15,18 @@ foreach server  '__TEST_DIR__/duckdb-rpc-socket'
 statement ok con1
 call rpc_start(${server});
 
-query I con2
-from rpc_call(${server}, 'select 42')
+query II con2
+from rpc_call(${server}, 'select 42, 43')
 ----
-42
+42	43
 
 statement ok con2
 attach ${server} as rpc (TYPE rpc)
 
-query I
+query II
 from rpc.fuu;
 ----
-42
+42	43
 
 statement ok con2
 detach rpc;

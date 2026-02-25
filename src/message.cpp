@@ -131,12 +131,14 @@ void PrepareRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(101, "connection_id", connection_id);
 	serializer.WriteProperty<string>(200, "sql_query", sql_query);
+	serializer.WriteProperty<bool>(201, "immediately_execute", immediately_execute);
 }
 
 unique_ptr<ProtocolMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
 	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
-	return make_uniq<PrepareRequestMessage>(connection_id, sql_query);
+	auto immediately_execute = deserializer.ReadProperty<bool>(201, "immediately_execute");
+	return make_uniq<PrepareRequestMessage>(connection_id, sql_query, immediately_execute);
 }
 
 void PrepareResponseMessage::Serialize(Serializer &serializer) const {

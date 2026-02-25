@@ -22,8 +22,8 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
-	auto bind_response =
-	    client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	auto bind_response = client->MakeRequest<PrepareResponseMessage>(
+	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
 	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();

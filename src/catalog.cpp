@@ -64,10 +64,6 @@ void RpcTransactionManager::RollbackTransaction(Transaction &transaction) {
 
 void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 	throw NotImplementedException("Checkpoint not implemented yet");
-	//
-	// auto &transaction = RpcTransaction::Get(context, db.GetCatalog());
-	// auto &db = transaction.GetConnection();
-	// db.Execute(context, "CHECKPOINT");
 }
 
 RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string_p)
@@ -110,36 +106,43 @@ const string &RpcCatalog::GetServerString() {
 	return server_string;
 }
 
-void RpcCatalog::ExecuteCommand(const string &query) {
-	// TODO return something here
+unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query) {
+	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	auto response = client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query));
+	chunk_collection->Initialize(response->Types());
+	auto fetch_response = client->MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
+	while (fetch_response->ResponseData() && fetch_response->ResponseData()->size() > 0) {
+		chunk_collection->Append(*fetch_response->ResponseData());
+	}
+	return chunk_collection;
+}
+
+RpcClient &RpcCatalog::GetRawClient() {
+	return *client;
+}
+
+const string &RpcCatalog::GetConnectionId() {
+	return connection_id;
 }
 
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction transaction,
                                                               const EntryLookupInfo &lookup_info) {
 	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
-	// TODO actually query this
-	create_info.columns.AddColumn(ColumnDefinition("id", LogicalType::INTEGER));
+	auto bind_response =
+	    rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
+	        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), true));
+	for (idx_t i = 0; i < bind_response->Types().size(); i++) {
+		create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
+	}
 	return new RpcTableCatalogEntry(catalog, *this, create_info);
 }
 
 TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
-	auto bind_data = make_uniq<RpcBindData>();
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
-
+	auto bind_data = make_uniq<RpcBindData>();
 	bind_data->uri = rpc_catalog.GetServerString();
-	// TODO we should not make another one here?!
-	auto client = RpcClient::GetClient(rpc_catalog.GetServerString());
-
-	auto connection_request_response =
-	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
-	bind_data->connection_id = connection_request_response->ConnectionId();
-
-	auto bind_response = client->MakeRequest<PrepareResponseMessage>(
-	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, StringUtil::Format("FROM %s", name)));
-
-	// TODO this is very wonky
+	bind_data->connection_id = rpc_catalog.GetConnectionId();
 	bind_data_p = std::move(bind_data);
 	return RpcScanFunction::GetFunction();
 }

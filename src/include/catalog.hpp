@@ -126,8 +126,11 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
-	void ExecuteCommand(const string &query);
+	unique_ptr<ColumnDataCollection> ExecuteCommand(const string &query);
 	const string &GetServerString();
+	const string &GetConnectionId();
+
+	RpcClient &GetRawClient();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;

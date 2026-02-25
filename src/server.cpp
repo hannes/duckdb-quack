@@ -226,43 +226,44 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(prepare_request_message.ConnectionId());
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		rpc_connection->duckdb_query_result.reset();
-
-		auto &client_config = ClientConfig::GetConfig(*rpc_connection->duckdb_connection->context);
-		client_config.enable_profiler = true;
-		client_config.profiling_coverage = ProfilingCoverage::ALL;
-		client_config.profiler_settings = {
-		    MetricType::EXTRA_INFO}; // 'EXTRA_INFO' means return estimated cardinality (among other things)
-		client_config.emit_profiler_output = false;
-		// TODO do we need to restore the previous config after this?
-
 		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
 		if (statement->HasError()) {
 			return make_uniq<ErrorMessage>(statement->GetError());
 		}
 
-		vector<Value> params; // TODO allow parameters here?
-		auto query_result = statement->PendingQuery(params, true)->Execute();
-
-		if (query_result->HasError()) {
-			return make_uniq<ErrorMessage>(query_result->GetError());
-		}
-
-		// for some reason the profiler is only alive here
-		auto &profiler = QueryProfiler::Get(*rpc_connection->duckdb_connection->context);
 		auto estimated_cardinality = optional_idx::Invalid();
+		if (prepare_request_message.ImmediatelyExecute()) {
+			auto &client_config = ClientConfig::GetConfig(*rpc_connection->duckdb_connection->context);
+			client_config.enable_profiler = true;
+			client_config.profiling_coverage = ProfilingCoverage::ALL;
+			client_config.profiler_settings = {
+			    MetricType::EXTRA_INFO}; // 'EXTRA_INFO' means return estimated cardinality (among other things)
+			client_config.emit_profiler_output = false;
+			// TODO do we need to restore the previous config after this?
 
-		if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
-			auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
-			// this should always be true, see above
-			D_ASSERT(profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO));
-			auto extra_info_map =
-			    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
-			if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
-				estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
+			vector<Value> params; // TODO allow parameters here?
+			auto query_result = statement->PendingQuery(params, true)->Execute();
+
+			if (query_result->HasError()) {
+				return make_uniq<ErrorMessage>(query_result->GetError());
 			}
-		}
 
-		rpc_connection->duckdb_query_result = std::move(query_result);
+			// for some reason the profiler is only alive here
+			auto &profiler = QueryProfiler::Get(*rpc_connection->duckdb_connection->context);
+
+			if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
+				auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
+				// this should always be true, see above
+				D_ASSERT(profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO));
+				auto extra_info_map =
+				    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
+				if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
+					estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
+				}
+			}
+
+			rpc_connection->duckdb_query_result = std::move(query_result);
+		}
 		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames(), estimated_cardinality);
 	}
 
@@ -278,7 +279,6 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
 		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
-
 		if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
 			auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 			rpc_connection->duckdb_query_result.reset();
