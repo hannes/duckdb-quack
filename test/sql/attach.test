@@ -14,11 +14,10 @@ create table fuu as values(42, 43);
 statement ok
 create table moo.fuu2 as values(44, 45);
 
-
 statement ok
 call rpc_generate_keys();
 
-foreach server  '__TEST_DIR__/duckdb-rpc-socket'
+foreach server  '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:1294'
 
 statement ok con1
 call rpc_start(${server});
@@ -36,10 +35,24 @@ from rpc.fuu;
 ----
 42	43
 
-query II
-from rpc.main.fuu;
+query I
+from rpc.main.fuu select col1 where col0=42 ;
 ----
-42	43
+43
+
+query II
+from rpc.main.fuu where col0=43;
+----
+
+statement error
+from rpc.yyyy
+----
+Table with name yyyy does not exist
+
+statement error
+from rpc.xxx.yyy;
+----
+schema "xxx" does not exist
 
 # TODO
 # query II
@@ -62,6 +75,5 @@ statement error con2
 attach ${server} as rpc (TYPE rpc)
 ----
 Connection refused
-
 
 endloop

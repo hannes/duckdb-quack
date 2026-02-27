@@ -162,7 +162,9 @@ optional_ptr<CatalogEntry> RpcCatalog::CreateSchema(CatalogTransaction transacti
 }
 
 void RpcCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
-	throw NotImplementedException("ScanSchemas not implemented yet");
+	for (auto &schema : schemas) {
+		//callback(*schema.second);
+	}
 }
 
 PhysicalOperator &RpcCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
