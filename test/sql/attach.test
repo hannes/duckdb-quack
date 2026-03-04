@@ -59,9 +59,14 @@ schema "xxx" does not exist
 # from rpc.moo.fuu2;
 # ----
 # 42	43
+#
+#
+# statement ok
+# create schema rpc.fuuschema;
 
 statement ok
 begin transaction
+
 
 statement ok
 create table rpc.fuu2(i integer);

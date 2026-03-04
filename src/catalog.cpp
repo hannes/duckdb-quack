@@ -164,7 +164,13 @@ TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, uniq
 }
 
 optional_ptr<CatalogEntry> RpcCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
-	throw NotImplementedException("CreateSchema not implemented yet");
+	auto create_schema_info = info.Copy();
+	create_schema_info->catalog = "memory";
+
+	auto catalog_request_message = make_uniq<CatalogRequestMessage>(GetConnectionId(), std::move(create_schema_info));
+	auto catalog_response = GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	return make_uniq_base<CatalogEntry, RpcSchemaCatalogEntry>(
+	    *this, catalog_response->GetParseInfo()->Cast<CreateSchemaInfo>());
 }
 
 void RpcCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
@@ -231,20 +237,14 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateFunction(CatalogTransact
 
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateTable(CatalogTransaction transaction,
                                                               BoundCreateTableInfo &info) {
-	auto &base_info = info.Base();
-	auto table_name = base_info.table;
-	if (base_info.on_conflict == OnCreateConflict::REPLACE_ON_CONFLICT) {
-		D_ASSERT(false);
-		// // CREATE OR REPLACE - drop any existing entries first (if any)
-		// TryDropEntry(transaction.GetContext(), CatalogType::TABLE_ENTRY, table_name);
-	}
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
 
-	info.base->catalog = GetInfo()->catalog;
-	info.base->schema = GetInfo()->schema;
+	auto create_table_info = info.Base().Copy();
+	create_table_info->catalog = GetInfo()->catalog;
+	create_table_info->schema = GetInfo()->schema;
 
 	auto catalog_request_message =
-	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(info.base));
+	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
 	auto catalog_response =
 	    rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
 	return make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(
@@ -280,13 +280,13 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateType(CatalogTransaction 
 }
 
 void RpcSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p) {
-	// TODO can we modify this??
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
-	auto info = info_p.Copy();
-	info->catalog = GetInfo()->catalog;
-	info->schema = GetInfo()->schema;
+	auto drop_info = info_p.Copy();
+	drop_info->catalog = GetInfo()->catalog;
+	drop_info->schema = GetInfo()->schema;
 
-	auto catalog_request_message = make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(info));
+	auto catalog_request_message =
+	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(drop_info));
 
 	rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
 }

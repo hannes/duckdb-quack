@@ -315,11 +315,17 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 			auto &catalog = Catalog::GetCatalog(context, create_info.catalog);
 			switch (create_info.type) {
 			case CatalogType::TABLE_ENTRY: {
-				auto create_table_info_ptr = reinterpret_cast<CreateTableInfo *>(parse_info.release());
-				unique_ptr<CreateTableInfo> create_table_info(create_table_info_ptr);
+				unique_ptr<CreateTableInfo> create_table_info(
+				    reinterpret_cast<CreateTableInfo *>(parse_info.release()));
 				auto &meta_transaction = MetaTransaction::Get(context);
 				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::CREATE_CATALOG_ENTRY);
 				auto create_result = catalog.CreateTable(context, std::move(create_table_info));
+				return make_uniq<CatalogResponseMessage>(create_result->GetInfo());
+			}
+			case CatalogType::SCHEMA_ENTRY: {
+				auto &meta_transaction = MetaTransaction::Get(context);
+				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::CREATE_CATALOG_ENTRY);
+				auto create_result = catalog.CreateSchema(context, parse_info->Cast<CreateSchemaInfo>());
 				return make_uniq<CatalogResponseMessage>(create_result->GetInfo());
 			}
 			default:
