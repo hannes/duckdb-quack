@@ -208,6 +208,7 @@ string RpcCatalog::GetDBPath() {
 }
 
 void RpcCatalog::DropSchema(ClientContext &context, DropInfo &info) {
+	// TODO should we just send over the drop info in a dropmessage???
 	throw NotImplementedException("DropSchema not implemented yet");
 }
 
@@ -239,13 +240,15 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateTable(CatalogTransaction
 	}
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
 
-	// TODO eeeh make this sql creation less gunky
-	auto create_sql = StringUtil::Format("CREATE TABLE %s %s", info.Base().table,
-	                                     TableCatalogEntry::ColumnsToSQL(info.Base().columns, info.Base().constraints));
-	;
-	rpc_catalog.ExecuteCommand(create_sql); // yolo
+	info.base->catalog = GetInfo()->catalog;
+	info.base->schema = GetInfo()->schema;
 
-	return make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(catalog, *this, info.Base());
+	auto catalog_request_message =
+	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(info.base));
+	auto catalog_response =
+	    rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	return make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(
+	    catalog, *this, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
 }
 
 optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
@@ -276,10 +279,16 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateType(CatalogTransaction 
 	throw NotImplementedException("CreateType not implemented yet");
 }
 
-void RpcSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info) {
-	// TODO this is way oversimplified
+void RpcSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p) {
+	// TODO can we modify this??
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
-	rpc_catalog.ExecuteCommand(StringUtil::Format("DROP TABLE %s", info.name));
+	auto info = info_p.Copy();
+	info->catalog = GetInfo()->catalog;
+	info->schema = GetInfo()->schema;
+
+	auto catalog_request_message = make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(info));
+
+	rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
 }
 void RpcSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	throw NotImplementedException("Alter not implemented yet, Alter!");

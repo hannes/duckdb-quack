@@ -1,4 +1,7 @@
 #include "message.hpp"
+
+#include "duckdb/catalog/catalog_entry.hpp"
+
 #include <sys/socket.h>
 
 using namespace duckdb;
@@ -17,6 +20,10 @@ string duckdb::MessageTypeToString(MessageType type) {
 		return "FETCH_REQUEST";
 	case MessageType::FETCH_RESPONSE:
 		return "FETCH_RESPONSE";
+	case MessageType::CATALOG_REQUEST:
+		return "CATALOG_REQUEST";
+	case MessageType::CATALOG_RESPONSE:
+		return "CATALOG_RESPONSE";
 	case MessageType::ERROR:
 		return "ERROR";
 	case MessageType::INVALID:
@@ -72,11 +79,11 @@ void ProtocolMessage::ToSocket(int fd, MemoryStream &write_stream) const {
 }
 
 void ProtocolMessage::Serialize(Serializer &serializer) const {
-	serializer.WriteProperty<uint8_t>(100, "message_type", static_cast<uint8_t>(message_type));
+	serializer.WriteProperty<uint8_t>(10, "message_type", static_cast<uint8_t>(message_type));
 }
 
 unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deserializer) {
-	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(100, "message_type"));
+	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(10, "message_type"));
 
 	unique_ptr<ProtocolMessage> result;
 
@@ -99,6 +106,12 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 	case MessageType::FETCH_RESPONSE:
 		result = FetchResponseMessage::Deserialize(deserializer);
 		break;
+	case MessageType::CATALOG_REQUEST:
+		result = CatalogRequestMessage::Deserialize(deserializer);
+		break;
+	case MessageType::CATALOG_RESPONSE:
+		result = CatalogResponseMessage::Deserialize(deserializer);
+		break;
 	case MessageType::ERROR:
 		result = ErrorMessage::Deserialize(deserializer);
 		break;
@@ -119,23 +132,23 @@ unique_ptr<ProtocolMessage> ConnectionRequestMessage::Deserialize(Deserializer &
 
 void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(101, "connection_id", connection_id);
+	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 }
 
 unique_ptr<ProtocolMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
+	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	return make_uniq<ConnectionResponseMessage>(connection_id);
 }
 
 void PrepareRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(101, "connection_id", connection_id);
+	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 	serializer.WriteProperty<string>(200, "sql_query", sql_query);
 	serializer.WriteProperty<bool>(201, "immediately_execute", immediately_execute);
 }
 
 unique_ptr<ProtocolMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
+	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
 	auto immediately_execute = deserializer.ReadProperty<bool>(201, "immediately_execute");
 	return make_uniq<PrepareRequestMessage>(connection_id, sql_query, immediately_execute);
@@ -157,13 +170,13 @@ unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &de
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
-	serializer.WriteProperty<string>(101, "connection_id", connection_id);
+	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 
 	// 240
 }
 
 unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadProperty<string>(101, "connection_id");
+	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	return make_uniq<FetchRequestMessage>(connection_id);
 }
 
@@ -197,4 +210,50 @@ void ErrorMessage::Serialize(Serializer &serializer) const {
 unique_ptr<ProtocolMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
 	auto error_message = deserializer.ReadProperty<string>(260, "error_message");
 	return make_uniq<ErrorMessage>(error_message);
+}
+
+void CatalogRequestMessage::Serialize(Serializer &serializer) const {
+	D_ASSERT(parse_info);
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(98, "connection_id", connection_id);
+	// FIXME this is only required because serialization of parse info is borked
+	serializer.WriteProperty<ParseInfoType>(97, "info_type", parse_info->info_type);
+	parse_info->Serialize(serializer);
+}
+
+unique_ptr<ProtocolMessage> CatalogRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
+	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
+	unique_ptr<ParseInfo> parse_info;
+	switch (info_type) {
+	case ParseInfoType::CREATE_INFO:
+		parse_info = CreateInfo::Deserialize(deserializer);
+		break;
+	default:
+		parse_info = ParseInfo::Deserialize(deserializer);
+		break;
+	}
+	return make_uniq<CatalogRequestMessage>(connection_id, std::move(parse_info));
+}
+
+void CatalogResponseMessage::Serialize(Serializer &serializer) const {
+	D_ASSERT(parse_info);
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<ParseInfoType>(97, "info_type", parse_info->info_type);
+	parse_info->Serialize(serializer);
+}
+
+// TODO this is duplicated
+unique_ptr<ProtocolMessage> CatalogResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
+	unique_ptr<ParseInfo> parse_info;
+	switch (info_type) {
+	case ParseInfoType::CREATE_INFO:
+		parse_info = CreateInfo::Deserialize(deserializer);
+		break;
+	default:
+		parse_info = ParseInfo::Deserialize(deserializer);
+		break;
+	}
+	return make_uniq<CatalogResponseMessage>(std::move(parse_info));
 }

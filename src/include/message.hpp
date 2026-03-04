@@ -3,6 +3,7 @@
 #include "duckdb/common/serializer/binary_deserializer.hpp"
 #include "duckdb/common/serializer/binary_serializer.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
 
 namespace duckdb {
 
@@ -14,6 +15,8 @@ enum class MessageType : uint8_t {
 	PREPARE_RESPONSE = 4,
 	FETCH_REQUEST = 7,
 	FETCH_RESPONSE = 8,
+	CATALOG_REQUEST = 9,
+	CATALOG_RESPONSE = 10,
 	ERROR = 100
 };
 
@@ -183,6 +186,81 @@ private:
 	unique_ptr<DataChunk> response_data;
 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
 };
+
+// orrr
+static unique_ptr<ParseInfo> ParseInfoCopy(ParseInfo &parse_info) {
+	switch (parse_info.info_type) {
+	case ParseInfoType::CREATE_INFO: {
+		return std::move(parse_info.Cast<CreateInfo>().Copy());
+	}
+	case ParseInfoType::DROP_INFO: {
+		return std::move(parse_info.Cast<DropInfo>().Copy());
+	}
+	default:
+		throw NotImplementedException("Unsupported ParseInfoType");
+	}
+}
+
+// struct ParseInfo;
+class CatalogRequestMessage : public ProtocolMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::CATALOG_REQUEST;
+
+	// explicit CatalogRequestMessage(ParseInfo& parse_info_p); // ORR
+	explicit CatalogRequestMessage(const string &connection_id_p, unique_ptr<ParseInfo> parse_info_p)
+	    : ProtocolMessage(TYPE), connection_id(connection_id_p), parse_info(std::move(parse_info_p)) {};
+
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+	unique_ptr<ParseInfo> GetParseInfo() const {
+		return ParseInfoCopy(*parse_info);
+	}
+	const std::string &ConnectionId() const {
+		return connection_id;
+	}
+
+private:
+	string connection_id;
+	unique_ptr<ParseInfo> parse_info;
+
+	CatalogRequestMessage() : ProtocolMessage(TYPE) {};
+};
+
+class CatalogResponseMessage : public ProtocolMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::CATALOG_RESPONSE;
+
+	explicit CatalogResponseMessage(unique_ptr<ParseInfo> parse_info_p)
+	    : ProtocolMessage(TYPE), parse_info(std::move(parse_info_p)) {};
+
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+	unique_ptr<ParseInfo> GetParseInfo() const {
+		return ParseInfoCopy(*parse_info);
+	}
+
+private:
+	unique_ptr<ParseInfo> parse_info;
+	CatalogResponseMessage() : ProtocolMessage(TYPE) {};
+};
+
+// class CatalogResponseMessage : public ProtocolMessage {
+// public:
+// 	static constexpr MessageType TYPE = MessageType::CATALOG_RESPONSE;
+//
+// 	explicit FetchResponseMessage(unique_ptr<DataChunk> response_data_p)
+// 		: ProtocolMessage(TYPE), response_data(std::move(response_data_p)) {};
+//
+// 	void Serialize(Serializer &serializer) const override;
+// 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+// 	optional_ptr<DataChunk> ResponseData() const {
+// 		return response_data.get();
+// 	}
+//
+// private:
+// 	unique_ptr<DataChunk> response_data;
+// 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
+// };
 
 class ErrorMessage : public ProtocolMessage {
 public:

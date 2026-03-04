@@ -7,6 +7,10 @@
 #include "duckdb/common/render_tree.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
 
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/statement/create_statement.hpp"
+#include "duckdb/planner/binder.hpp"
+
 using namespace duckdb;
 
 using websocketpp::lib::placeholders::_1;
@@ -23,7 +27,7 @@ optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id
 	if (it != active_connections.end()) {
 		return it->second.get();
 	}
-	throw IOException("Invalid connection id %s", connection_id);
+	return nullptr;
 }
 
 string RpcServer::CreateNewConnection() {
@@ -217,13 +221,16 @@ void WebSocketRpcServer::Listen(const string &listen_string_p) {
 unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
-		auto connection_request_message = received_message.Cast<ConnectionRequestMessage>();
+		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
 		// TODO handle auth here! Only return a connection ID if auth succeeds.
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection());
 	}
 	case MessageType::PREPARE_REQUEST: {
-		auto prepare_request_message = received_message.Cast<PrepareRequestMessage>();
+		auto &prepare_request_message = received_message.Cast<PrepareRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(prepare_request_message.ConnectionId());
+		if (!rpc_connection) {
+			return make_uniq<ErrorMessage>("Invalid connection id");
+		}
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		rpc_connection->duckdb_query_result.reset();
 		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
@@ -265,8 +272,11 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	}
 
 	case MessageType::FETCH_REQUEST: {
-		auto fetch_request_message = received_message.Cast<FetchRequestMessage>();
+		auto &fetch_request_message = received_message.Cast<FetchRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(fetch_request_message.ConnectionId());
+		if (!rpc_connection) {
+			return make_uniq<ErrorMessage>("Invalid connection id");
+		}
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 
 		if (!rpc_connection->duckdb_query_result) {
@@ -287,8 +297,58 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		}
 		return make_uniq<FetchResponseMessage>(std::move(result_chunk));
 	}
+	case MessageType::CATALOG_REQUEST: {
+		auto &catalog_request_message = received_message.Cast<CatalogRequestMessage>();
+		optional_ptr<RpcConnection> rpc_connection = GetConnection(catalog_request_message.ConnectionId());
+		if (!rpc_connection) {
+			return make_uniq<ErrorMessage>("Invalid connection id");
+		}
+		std::unique_lock<std::mutex> lock(rpc_connection->lock);
+		auto &context = *rpc_connection->duckdb_connection->context;
+
+		// FIXME handle other types!
+		auto parse_info = catalog_request_message.GetParseInfo();
+
+		switch (parse_info->info_type) {
+		case ParseInfoType::CREATE_INFO: {
+			auto &create_info = parse_info->Cast<CreateInfo>();
+			auto &catalog = Catalog::GetCatalog(context, create_info.catalog);
+			switch (create_info.type) {
+			case CatalogType::TABLE_ENTRY: {
+				auto create_table_info_ptr = reinterpret_cast<CreateTableInfo *>(parse_info.release());
+				unique_ptr<CreateTableInfo> create_table_info(create_table_info_ptr);
+				auto &meta_transaction = MetaTransaction::Get(context);
+				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::CREATE_CATALOG_ENTRY);
+				auto create_result = catalog.CreateTable(context, std::move(create_table_info));
+				return make_uniq<CatalogResponseMessage>(create_result->GetInfo());
+			}
+			default:
+				return make_uniq<ErrorMessage>(
+				    StringUtil::Format("Unimplemented catalog type %s", CatalogTypeToString(create_info.type)));
+			}
+		}
+		case ParseInfoType::DROP_INFO: {
+			auto &drop_info = parse_info->Cast<DropInfo>();
+			auto &catalog = Catalog::GetCatalog(context, drop_info.catalog);
+			switch (drop_info.type) {
+			case CatalogType::TABLE_ENTRY: {
+				auto &meta_transaction = MetaTransaction::Get(context);
+				meta_transaction.ModifyDatabase(catalog.GetAttached(), DatabaseModificationType::DROP_CATALOG_ENTRY);
+				catalog.DropEntry(context, drop_info);
+				return make_uniq<CatalogResponseMessage>(drop_info.Copy()); // The copy is not used but oh well
+			}
+			default:
+				return make_uniq<ErrorMessage>(
+				    StringUtil::Format("Unimplemented catalog type %s", CatalogTypeToString(drop_info.type)));
+			}
+		}
+		default:
+			return make_uniq<ErrorMessage>("Unimplemented parse info type");
+		}
+	}
 	default: {
-		throw IOException("Unimplemented message type %s", MessageTypeToString(received_message.Type()));
+		return make_uniq<ErrorMessage>(
+		    StringUtil::Format("Unimplemented message type %s", MessageTypeToString(received_message.Type())));
 	}
 	}
 }
