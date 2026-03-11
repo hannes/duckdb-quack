@@ -17,6 +17,8 @@ enum class MessageType : uint8_t {
 	FETCH_RESPONSE = 8,
 	CATALOG_REQUEST = 9,
 	CATALOG_RESPONSE = 10,
+	APPEND_REQUEST = 11,
+	APPEND_RESPONSE = 12,
 	ERROR = 100
 };
 
@@ -89,8 +91,6 @@ private:
 	string connection_id; // FIXME abstract this to some superclass
 	string sql_query;
 	bool immediately_execute;
-
-	PrepareRequestMessage() : ProtocolMessage(TYPE) {};
 };
 
 class PrepareResponseMessage : public ProtocolMessage {
@@ -146,8 +146,6 @@ public:
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
 
 private:
-	ConnectionResponseMessage() : ProtocolMessage(TYPE) {
-	}
 	string connection_id;
 };
 
@@ -184,7 +182,6 @@ public:
 
 private:
 	unique_ptr<DataChunk> response_data;
-	FetchResponseMessage() : ProtocolMessage(TYPE) {};
 };
 
 // orrr
@@ -201,12 +198,10 @@ static unique_ptr<ParseInfo> ParseInfoCopy(ParseInfo &parse_info) {
 	}
 }
 
-// struct ParseInfo;
 class CatalogRequestMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CATALOG_REQUEST;
 
-	// explicit CatalogRequestMessage(ParseInfo& parse_info_p); // ORR
 	explicit CatalogRequestMessage(const string &connection_id_p, unique_ptr<ParseInfo> parse_info_p)
 	    : ProtocolMessage(TYPE), connection_id(connection_id_p), parse_info(std::move(parse_info_p)) {};
 
@@ -222,8 +217,6 @@ public:
 private:
 	string connection_id;
 	unique_ptr<ParseInfo> parse_info;
-
-	CatalogRequestMessage() : ProtocolMessage(TYPE) {};
 };
 
 class CatalogResponseMessage : public ProtocolMessage {
@@ -241,26 +234,48 @@ public:
 
 private:
 	unique_ptr<ParseInfo> parse_info;
-	CatalogResponseMessage() : ProtocolMessage(TYPE) {};
 };
 
-// class CatalogResponseMessage : public ProtocolMessage {
-// public:
-// 	static constexpr MessageType TYPE = MessageType::CATALOG_RESPONSE;
-//
-// 	explicit FetchResponseMessage(unique_ptr<DataChunk> response_data_p)
-// 		: ProtocolMessage(TYPE), response_data(std::move(response_data_p)) {};
-//
-// 	void Serialize(Serializer &serializer) const override;
-// 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-// 	optional_ptr<DataChunk> ResponseData() const {
-// 		return response_data.get();
-// 	}
-//
-// private:
-// 	unique_ptr<DataChunk> response_data;
-// 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
-// };
+class AppendRequestMessage : public ProtocolMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::APPEND_REQUEST;
+
+	explicit AppendRequestMessage(const string &connection_id_p, const string &schema_name_p,
+	                              const string &table_name_p, unique_ptr<DataChunk> append_chunk_p)
+	    : ProtocolMessage(TYPE), connection_id(connection_id_p), schema_name(schema_name_p), table_name(table_name_p),
+	      append_chunk(std::move(append_chunk_p)) {};
+
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+	DataChunk &AppendChunk() const {
+		return *append_chunk;
+	}
+	const std::string &ConnectionId() const {
+		return connection_id;
+	}
+	const std::string &SchemaName() const {
+		return schema_name;
+	}
+	const std::string &TableName() const {
+		return table_name;
+	}
+
+private:
+	string connection_id;
+	string schema_name;
+	string table_name;
+	unique_ptr<DataChunk> append_chunk;
+};
+
+class AppendResponseMessage : public ProtocolMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::APPEND_RESPONSE;
+
+	explicit AppendResponseMessage() : ProtocolMessage(TYPE) {};
+
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+};
 
 class ErrorMessage : public ProtocolMessage {
 public:

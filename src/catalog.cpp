@@ -2,12 +2,14 @@
 
 #include "rpc_scan_function.hpp"
 #include "rpc_bind_data.hpp"
+#include "rpc_insert.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
+#include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/storage/database_size.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
@@ -179,14 +181,6 @@ void RpcCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCa
 	}
 }
 
-PhysicalOperator &RpcCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
-                                                LogicalCreateTable &op, PhysicalOperator &plan) {
-	throw NotImplementedException("PlanCreateTableAs not implemented yet");
-}
-PhysicalOperator &RpcCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
-                                         optional_ptr<PhysicalOperator> plan) {
-	throw NotImplementedException("PlanInsert not implemented yet");
-}
 PhysicalOperator &RpcCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,
                                          PhysicalOperator &plan) {
 	throw NotImplementedException("PlanDelete not implemented yet");

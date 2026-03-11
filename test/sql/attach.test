@@ -14,10 +14,11 @@ create table fuu as values(42, 43);
 statement ok
 create table moo.fuu2 as values(44, 45);
 
-statement ok
-call rpc_generate_keys();
+# statement ok
+# call rpc_generate_keys();
 
-foreach server  '__TEST_DIR__/duckdb-rpc-socket' 'wss://localhost:1294'
+foreach server  '__TEST_DIR__/duckdb-rpc-socket'
+# 'wss://localhost:1294'
 
 statement ok con1
 call rpc_start(${server});
@@ -70,9 +71,7 @@ begin transaction
 
 statement ok
 create table rpc.fuu2(i integer);
-#
-# statement ok
-# insert into rpc.fuu2 values (42);
+
 
 statement ok
 from rpc.fuu2;
@@ -84,7 +83,6 @@ statement ok
 from rpc.fuu2;
 
 
-# TODO temporary, lets get drop to work
 statement ok
 drop table rpc.fuu2;
 
@@ -94,12 +92,19 @@ begin transaction
 
 statement ok
 create table rpc.fuu3(i integer);
-#
-# statement ok
-# insert into rpc.fuu2 values (42);
+
+statement error
+insert into rpc.fuu2 values (42);
+----
+not exist
 
 statement ok
-from rpc.fuu3;
+insert into rpc.fuu3 from range(10000);
+
+query I
+from rpc.fuu3 select count(i);
+----
+10000
 
 statement ok
 rollback

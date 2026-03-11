@@ -352,6 +352,19 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 			return make_uniq<ErrorMessage>("Unimplemented parse info type");
 		}
 	}
+	case MessageType::APPEND_REQUEST: {
+		auto &append_request_message = received_message.Cast<AppendRequestMessage>();
+		optional_ptr<RpcConnection> rpc_connection = GetConnection(append_request_message.ConnectionId());
+		std::unique_lock<std::mutex> lock(rpc_connection->lock);
+		auto &context = *rpc_connection->duckdb_connection->context;
+
+		// disable autocommit?
+		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());
+		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
+		collection.Append(append_request_message.AppendChunk());
+		rpc_connection->duckdb_connection->Append(*table_info, collection);
+		return make_uniq<AppendResponseMessage>();
+	}
 	default: {
 		return make_uniq<ErrorMessage>(
 		    StringUtil::Format("Unimplemented message type %s", MessageTypeToString(received_message.Type())));

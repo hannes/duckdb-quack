@@ -1,6 +1,7 @@
 #include "message.hpp"
 
 #include "duckdb/catalog/catalog_entry.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 
 #include <sys/socket.h>
 
@@ -24,6 +25,10 @@ string duckdb::MessageTypeToString(MessageType type) {
 		return "CATALOG_REQUEST";
 	case MessageType::CATALOG_RESPONSE:
 		return "CATALOG_RESPONSE";
+	case MessageType::APPEND_REQUEST:
+		return "APPEND_REQUEST";
+	case MessageType::APPEND_RESPONSE:
+		return "APPEND_RESPONSE";
 	case MessageType::ERROR:
 		return "ERROR";
 	case MessageType::INVALID:
@@ -84,42 +89,32 @@ void ProtocolMessage::Serialize(Serializer &serializer) const {
 
 unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deserializer) {
 	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(10, "message_type"));
-
-	unique_ptr<ProtocolMessage> result;
-
 	switch (message_type) {
 	case MessageType::CONNECTION_REQUEST:
-		result = ConnectionRequestMessage::Deserialize(deserializer);
-		break;
+		return ConnectionRequestMessage::Deserialize(deserializer);
 	case MessageType::CONNECTION_RESPONSE:
-		result = ConnectionResponseMessage::Deserialize(deserializer);
-		break;
+		return ConnectionResponseMessage::Deserialize(deserializer);
 	case MessageType::PREPARE_REQUEST:
-		result = PrepareRequestMessage::Deserialize(deserializer);
-		break;
+		return PrepareRequestMessage::Deserialize(deserializer);
 	case MessageType::PREPARE_RESPONSE:
-		result = PrepareResponseMessage::Deserialize(deserializer);
-		break;
+		return PrepareResponseMessage::Deserialize(deserializer);
 	case MessageType::FETCH_REQUEST:
-		result = FetchRequestMessage::Deserialize(deserializer);
-		break;
+		return FetchRequestMessage::Deserialize(deserializer);
 	case MessageType::FETCH_RESPONSE:
-		result = FetchResponseMessage::Deserialize(deserializer);
-		break;
+		return FetchResponseMessage::Deserialize(deserializer);
 	case MessageType::CATALOG_REQUEST:
-		result = CatalogRequestMessage::Deserialize(deserializer);
-		break;
+		return CatalogRequestMessage::Deserialize(deserializer);
 	case MessageType::CATALOG_RESPONSE:
-		result = CatalogResponseMessage::Deserialize(deserializer);
-		break;
+		return CatalogResponseMessage::Deserialize(deserializer);
+	case MessageType::APPEND_REQUEST:
+		return AppendRequestMessage::Deserialize(deserializer);
+	case MessageType::APPEND_RESPONSE:
+		return AppendResponseMessage::Deserialize(deserializer);
 	case MessageType::ERROR:
-		result = ErrorMessage::Deserialize(deserializer);
-		break;
+		return ErrorMessage::Deserialize(deserializer);
 	default:
 		throw SerializationException("Unsupported type for deserialization of Message!");
 	}
-
-	return result;
 }
 
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
@@ -256,4 +251,35 @@ unique_ptr<ProtocolMessage> CatalogResponseMessage::Deserialize(Deserializer &de
 		break;
 	}
 	return make_uniq<CatalogResponseMessage>(std::move(parse_info));
+}
+
+void AppendRequestMessage::Serialize(Serializer &serializer) const {
+	D_ASSERT(append_chunk);
+	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(98, "connection_id", connection_id);
+	serializer.WriteProperty<string>(270, "schema_name", schema_name);
+	serializer.WriteProperty<string>(271, "table_name", table_name);
+
+	serializer.WriteObject(272, "append_chunk",
+	                       [&](Serializer &inner_serializer) { append_chunk->Serialize(inner_serializer); });
+}
+
+unique_ptr<ProtocolMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto connection_id_p = deserializer.ReadProperty<string>(98, "connection_id");
+	auto schema_name_p = deserializer.ReadProperty<string>(270, "schema_name");
+	auto table_name_p = deserializer.ReadProperty<string>(271, "table_name");
+
+	auto append_chunk_p = make_uniq<DataChunk>();
+	deserializer.ReadObject(272, "append_chunk",
+	                        [&](Deserializer &inner_deserializer) { append_chunk_p->Deserialize(inner_deserializer); });
+
+	return make_uniq<AppendRequestMessage>(connection_id_p, schema_name_p, table_name_p, std::move(append_chunk_p));
+}
+
+void AppendResponseMessage::Serialize(Serializer &serializer) const {
+	ProtocolMessage::Serialize(serializer);
+}
+
+unique_ptr<ProtocolMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
+	return make_uniq<AppendResponseMessage>();
 }
