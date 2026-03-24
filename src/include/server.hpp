@@ -91,6 +91,7 @@ private:
 	static void WebsocketListenThread(WebSocketRpcServer *rpc_server);
 
 	server websocket_server;
+	context_ptr ctx;
 };
 
 } // namespace duckdb
