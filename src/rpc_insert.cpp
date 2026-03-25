@@ -1,5 +1,6 @@
 #include "rpc_insert.hpp"
 
+#include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/planner/operator/logical_create_table.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
@@ -8,6 +9,7 @@
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "include/catalog.hpp"
+#include "message.hpp"
 
 namespace duckdb {
 
@@ -28,42 +30,50 @@ RpcInsert::RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCat
 //===--------------------------------------------------------------------===//
 class RpcInsertGlobalState : public GlobalSinkState {
 public:
-	explicit RpcInsertGlobalState(ClientContext &context, RpcTableCatalogEntry &table) : table(table), insert_count(0) {
+	explicit RpcInsertGlobalState(RpcTableCatalogEntry &table_p) : table(table_p), insert_count(0) {
+	}
+	RpcInsertGlobalState(unique_ptr<CatalogEntry> owned_entry_p)
+	    : table(owned_entry_p->Cast<RpcTableCatalogEntry>()), owned_entry(std::move(owned_entry_p)), insert_count(0) {
 	}
 
 	RpcTableCatalogEntry &table;
-	// PostgresCopyState copy_state;
-	// DataChunk varchar_chunk;
+	unique_ptr<CatalogEntry> owned_entry;
 	idx_t insert_count;
-	// PostgresCopyFormat format;
-	// vector<string> insert_column_names;
-	// bool copy_is_active = false;
-	//
-	// void FinishCopyTo(PostgresConnection &connection) {
-	// 	if (!copy_is_active) {
-	// 		return;
-	// 	}
-	// 	connection.FinishCopyTo(copy_state);
-	// 	copy_is_active = false;
-	// }
 };
 
 unique_ptr<GlobalSinkState> RpcInsert::GetGlobalSinkState(ClientContext &context) const {
-	return make_uniq<RpcInsertGlobalState>(context, table.get_mutable()->Cast<RpcTableCatalogEntry>());
+	if (table) {
+		return make_uniq<RpcInsertGlobalState>(table.get_mutable()->Cast<RpcTableCatalogEntry>());
+	}
+	// CREATE TABLE AS path: create the table on the remote side first
+	auto &rpc_schema = schema.get_mutable()->Cast<RpcSchemaCatalogEntry>();
+	auto &rpc_catalog = rpc_schema.catalog.Cast<RpcCatalog>();
+
+	auto create_table_info = info->Base().Copy();
+	create_table_info->catalog = rpc_schema.GetInfo()->catalog;
+	create_table_info->schema = rpc_schema.GetInfo()->schema;
+
+	auto catalog_request_message =
+	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
+	auto catalog_response =
+	    rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	auto entry = make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(
+	    rpc_schema.catalog, rpc_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
+	return make_uniq<RpcInsertGlobalState>(std::move(entry));
 }
 
 //===--------------------------------------------------------------------===//
 // Sink
 //===--------------------------------------------------------------------===//
 SinkResultType RpcInsert::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
-	auto &rpc_catalog = table->catalog.Cast<RpcCatalog>();
 	auto &global_state = input.global_state.Cast<RpcInsertGlobalState>();
+	auto &tbl = global_state.table;
+	auto &rpc_catalog = tbl.catalog.Cast<RpcCatalog>();
 	auto append_chunk = make_uniq<DataChunk>();
 	append_chunk->Initialize(context.client, chunk.GetTypes());
 	append_chunk->Reference(chunk);
-	// TODO do we have to deal with differing column names??
-	auto append_message = make_uniq<AppendRequestMessage>(rpc_catalog.GetConnectionId(), table->schema.name,
-	                                                      table->name, std::move(append_chunk));
+	auto append_message = make_uniq<AppendRequestMessage>(rpc_catalog.GetConnectionId(), tbl.schema.name,
+	                                                      tbl.name, std::move(append_chunk));
 	rpc_catalog.GetRawClient().MakeRequest<AppendResponseMessage>(std::move(append_message));
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;

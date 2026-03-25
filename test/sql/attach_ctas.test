@@ -1,0 +1,32 @@
+# name: test/sql/attach_ctas.test
+# description: test CREATE TABLE AS over rpc attach
+# group: [sql]
+
+require rpc
+
+foreach server  '__TEST_DIR__/duckdb-rpc-socket-ctas'
+
+statement ok con1
+call rpc_start(${server});
+
+statement ok con2
+attach ${server} as rpc (TYPE rpc)
+
+statement ok
+create table rpc.t as select range a from range(10);
+
+query I
+from rpc.t select count(a);
+----
+10
+
+statement ok
+drop table rpc.t;
+
+statement ok con2
+detach rpc;
+
+statement ok con1
+call rpc_stop(${server});
+
+endloop
