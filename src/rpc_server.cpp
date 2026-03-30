@@ -42,15 +42,6 @@ string RpcServer::CreateNewConnection() {
 	return connection_id;
 }
 
-// this cannot be in the generic destructor because it looks like the subclass-specific stuff gets destroyed before we
-// get there
-static void JoinListenThread(std::thread &listen_thread) {
-	try {
-		listen_thread.join();
-	} catch (std::exception &) {
-	}
-}
-
 // main switcheroo happens here
 unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
@@ -131,6 +122,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		}
 		return make_uniq<FetchResponseMessage>(std::move(result_chunk));
 	}
+
 	case MessageType::CATALOG_REQUEST: {
 		auto &catalog_request_message = received_message.Cast<CatalogRequestMessage>();
 		optional_ptr<RpcConnection> rpc_connection = GetConnection(catalog_request_message.ConnectionId());

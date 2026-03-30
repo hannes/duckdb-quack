@@ -51,7 +51,6 @@ protected:
 	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
 
 protected:
-	string listen_string;
 	std::vector<std::thread> listen_threads;
 
 	shared_ptr<DatabaseInstance> db;

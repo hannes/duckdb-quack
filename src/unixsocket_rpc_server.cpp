@@ -1,8 +1,6 @@
 #include "rpc_server.hpp"
 #include "message.hpp"
-#include "ssl_key_generator.hpp"
 
-#include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/render_tree.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
@@ -67,7 +65,6 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 		throw InvalidInputException("Empty listen string specified");
 	}
 	D_ASSERT(!StringUtil::StartsWith(listen_string_p, "wss:"));
-	listen_string = listen_string_p;
 
 	unix_socket_server_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (unix_socket_server_fd == -1) {
@@ -76,18 +73,18 @@ void UnixSocketRpcServer::Listen(const string &listen_string_p) {
 
 	unix_socket_address.sun_family = AF_UNIX;
 	memset(&unix_socket_address, 0, sizeof(sockaddr_un));
-	strncpy(unix_socket_address.sun_path, listen_string.c_str(), sizeof(unix_socket_address.sun_path) - 1);
+	strncpy(unix_socket_address.sun_path, listen_string_p.c_str(), sizeof(unix_socket_address.sun_path) - 1);
 
 	auto unlink_result = unlink(unix_socket_address.sun_path);
 	if (unlink_result && errno != ENOENT) {
-		throw IOException("Error cleaning up socket %s: %s", listen_string, strerror(errno));
+		throw IOException("Error cleaning up socket %s: %s", listen_string_p, strerror(errno));
 	}
 
 	if (bind(unix_socket_server_fd, reinterpret_cast<sockaddr *>(&unix_socket_address),
 	         SUN_LEN(&unix_socket_address)) ||
-	    chmod(listen_string.c_str(), S_IWUSR | S_IRUSR) ||
+	    chmod(listen_string_p.c_str(), S_IWUSR | S_IRUSR) ||
 	    listen(unix_socket_server_fd, 100 /* TODO: magic constant for connect queue length, should be fine */)) {
-		throw IOException("Error listening to socket %s: %s", listen_string, strerror(errno));
+		throw IOException("Error listening to socket %s: %s", listen_string_p, strerror(errno));
 	}
 
 	unix_socket_keep_listening = true;

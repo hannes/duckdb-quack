@@ -2,14 +2,7 @@
 #include "message.hpp"
 #include "ssl_key_generator.hpp"
 
-#include "duckdb/main/client_context.hpp"
-#include "duckdb/main/connection.hpp"
-#include "duckdb/common/render_tree.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
-
-#include "duckdb/parser/parsed_data/create_table_info.hpp"
-#include "duckdb/parser/statement/create_statement.hpp"
-#include "duckdb/planner/binder.hpp"
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.hpp"
@@ -30,16 +23,7 @@ void HttpsRpcServer::ListenThread(HttpsRpcServer *rpc_server, const string &list
 	D_ASSERT(rpc_server);
 	D_ASSERT(rpc_server->server);
 	D_ASSERT(listen_port > 1 && listen_port < 65535);
-	D_ASSERT(listen_host == "localhost"); // FIXME
 	rpc_server->server->listen(listen_host, listen_port);
-}
-
-template <class T>
-string GetUriPart(T ele) {
-	if (ele.afterLast - ele.first < 1) {
-		throw InvalidInputException("Invalid URI");
-	}
-	return string(ele.first, ele.afterLast - ele.first);
 }
 
 void HttpsRpcServer::Listen(const string &listen_string_p) {
@@ -49,8 +33,6 @@ void HttpsRpcServer::Listen(const string &listen_string_p) {
 	// we construct this client solely to parse the host/port url
 	duckdb_httplib_openssl::Client dummy_client(listen_string_p);
 	bool use_https = dummy_client.ssl_context() != nullptr;
-
-	listen_string = listen_string_p;
 
 	if (use_https) {
 		auto &fs = FileSystem::GetFileSystem(*db);
@@ -64,9 +46,7 @@ void HttpsRpcServer::Listen(const string &listen_string_p) {
 	} else {
 		server = make_uniq<duckdb_httplib_openssl::Server>();
 	}
-	if (!server->is_valid()) {
-		throw InternalException("Failed to instantiate HTTP(S) server");
-	}
+
 	// TODO make this configurable?
 	server->new_task_queue = [] {
 		return new duckdb_httplib_openssl::ThreadPool(/*base_threads=*/8, /*max_threads=*/64);
@@ -85,6 +65,10 @@ void HttpsRpcServer::Listen(const string &listen_string_p) {
 		HandleMessage(*ProtocolMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
 		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/duckdb");
 	});
+
+	if (!server->is_valid()) {
+		throw InternalException("Failed to instantiate HTTP(S) server at %s", listen_string_p);
+	}
 
 	listen_threads.push_back(std::thread(ListenThread, this, dummy_client.host(), dummy_client.port()));
 }
