@@ -3,6 +3,11 @@
 
 Starts an RPC server, spawns concurrent reader and writer workers,
 and reports latency/throughput stats.
+
+Usage:
+    uv run --with duckdb==1.5.1 python scripts/test_concurrent.py
+    uv run --with duckdb==1.5.1 python scripts/test_concurrent.py --address http://localhost:19444
+    uv run --with duckdb==1.5.1 python scripts/test_concurrent.py --readers 8 --writers 4 --iterations 100
 """
 
 import argparse
@@ -25,17 +30,17 @@ def make_connection():
     return conn
 
 
-def setup_server(socket_path):
+def setup_server(address):
     conn = make_connection()
     conn.execute("CREATE TABLE test_data AS SELECT i, 'row_' || i AS name FROM range(10000) t(i)")
-    conn.execute(f"CALL rpc_start('{socket_path}')")
+    conn.execute(f"CALL rpc_start('{address}')")
     time.sleep(0.2)
     return conn
 
 
-def reader_worker(socket_path, iterations, worker_id):
+def reader_worker(address, iterations, worker_id):
     conn = make_connection()
-    conn.execute(f"ATTACH '{socket_path}' AS remote (TYPE rpc)")
+    conn.execute(f"ATTACH '{address}' AS remote_{worker_id} (TYPE rpc)")
 
     latencies = []
     errors = 0
@@ -45,7 +50,7 @@ def reader_worker(socket_path, iterations, worker_id):
         try:
             start = time.perf_counter()
             conn.execute(
-                f"SELECT count(*), max(i) FROM remote.main.test_data WHERE i > {threshold}"
+                f"SELECT count(*), max(i) FROM remote_{worker_id}.main.test_data WHERE i > {threshold}"
             ).fetchall()
             latencies.append(time.perf_counter() - start)
         except Exception as e:
@@ -56,9 +61,9 @@ def reader_worker(socket_path, iterations, worker_id):
     return {"type": "reader", "id": worker_id, "latencies": latencies, "errors": errors}
 
 
-def writer_worker(socket_path, iterations, worker_id, id_offset):
+def writer_worker(address, iterations, worker_id, id_offset):
     conn = make_connection()
-    conn.execute(f"ATTACH '{socket_path}' AS remote (TYPE rpc)")
+    conn.execute(f"ATTACH '{address}' AS remote_{worker_id} (TYPE rpc, READ_WRITE)")
 
     latencies = []
     errors = 0
@@ -68,7 +73,7 @@ def writer_worker(socket_path, iterations, worker_id, id_offset):
         try:
             start = time.perf_counter()
             conn.execute(
-                f"INSERT INTO remote.main.test_data VALUES ({row_id}, 'written_{row_id}')"
+                f"INSERT INTO remote_{worker_id}.main.test_data VALUES ({row_id}, 'written_{row_id}')"
             )
             latencies.append(time.perf_counter() - start)
         except Exception as e:
@@ -107,15 +112,27 @@ def print_stats(label, latencies):
 
 def main():
     parser = argparse.ArgumentParser(description="Concurrent stress test for duckdb-rpc")
+    parser.add_argument(
+        "--address",
+        type=str,
+        default=None,
+        help="Listen address (e.g. http://localhost:19444 or /tmp/rpc.sock). "
+             "Defaults to a unix socket at /tmp/duckdb-rpc-test-<pid>",
+    )
     parser.add_argument("--readers", type=int, default=4, help="Number of reader workers")
     parser.add_argument("--writers", type=int, default=2, help="Number of writer workers")
     parser.add_argument("--iterations", type=int, default=50, help="Iterations per worker")
     args = parser.parse_args()
 
-    socket_path = f"/tmp/duckdb-rpc-test-{os.getpid()}"
+    is_unix_socket = False
+    if args.address:
+        address = args.address
+    else:
+        address = f"/tmp/duckdb-rpc-test-{os.getpid()}"
+        is_unix_socket = True
 
-    print(f"Starting server on {socket_path}")
-    server_conn = setup_server(socket_path)
+    print(f"Starting server on {address}")
+    server_conn = setup_server(address)
 
     print(f"Launching {args.readers} readers + {args.writers} writers, {args.iterations} iterations each")
     wall_start = time.perf_counter()
@@ -123,10 +140,10 @@ def main():
     futures = []
     with ThreadPoolExecutor(max_workers=args.readers + args.writers) as pool:
         for i in range(args.readers):
-            futures.append(pool.submit(reader_worker, socket_path, args.iterations, i))
+            futures.append(pool.submit(reader_worker, address, args.iterations, i))
         for i in range(args.writers):
             id_offset = 100_000 + i * args.iterations
-            futures.append(pool.submit(writer_worker, socket_path, args.iterations, i, id_offset))
+            futures.append(pool.submit(writer_worker, address, args.iterations, i, id_offset))
 
         results = [f.result() for f in as_completed(futures)]
 
@@ -149,12 +166,13 @@ def main():
     print(f"  Total: {total_ops} ops, {total_ops / wall_time:.1f} ops/s, {total_errors} errors")
 
     print("\nTearing down...")
-    server_conn.execute(f"CALL rpc_stop('{socket_path}')")
+    server_conn.execute(f"CALL rpc_stop('{address}')")
     server_conn.close()
-    try:
-        os.unlink(socket_path)
-    except FileNotFoundError:
-        pass
+    if is_unix_socket:
+        try:
+            os.unlink(address)
+        except FileNotFoundError:
+            pass
 
     print("Done.")
 
