@@ -156,7 +156,7 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 	try {
 		auto bind_response =
 		    rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
-		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), true));
+		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), false));
 		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
 			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
 		}
@@ -171,6 +171,7 @@ TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, uniq
 	auto bind_data = make_uniq<RpcBindData>();
 	bind_data->uri = rpc_catalog.GetServerString();
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
+	bind_data->table_name = name;
 	bind_data_p = std::move(bind_data);
 	return RpcScanFunction::GetFunction();
 }

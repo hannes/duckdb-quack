@@ -12,6 +12,7 @@ struct RpcBindData : FunctionData {
 	}
 	string connection_id;
 	string uri;
+	string table_name;
 	optional_idx estimated_cardinality;
 	unique_ptr<RpcClient> initial_client;
 };
