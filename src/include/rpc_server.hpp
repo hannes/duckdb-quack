@@ -88,5 +88,6 @@ private:
 
 	unique_ptr<duckdb_httplib_openssl::Server> server;
 };
+;
 
 } // namespace duckdb

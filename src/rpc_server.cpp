@@ -38,8 +38,39 @@ string RpcServer::CreateNewConnection() {
 
 	auto new_connection = make_uniq<RpcConnection>();
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
+	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
+	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
+
+	auto &client_config = ClientConfig::GetConfig(*new_connection->duckdb_connection->context);
+	client_config.enable_profiler = true;
+	// client_config.enable_detailed_profiling = true;
+	client_config.profiling_coverage = ProfilingCoverage::SELECT;
+	client_config.emit_profiler_output = false;
+	client_config.profiler_settings = {
+	    MetricType::EXTRA_INFO}; // 'EXTRA_INFO' means return estimated cardinality (among other things)
+
 	active_connections[connection_id] = std::move(new_connection);
 	return connection_id;
+}
+
+// try to get an estimated cardinality from the profiler, orrr
+static optional_idx GetEstimatedCardinality(ClientContext &context) {
+	optional_idx estimated_cardinality = optional_idx::Invalid();
+	auto &profiler = QueryProfiler::Get(context);
+	if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
+		auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
+		if (profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO)) {
+			auto extra_info_map =
+			    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
+			if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
+				estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
+			}
+		}
+	}
+	if (estimated_cardinality == 0) {
+		estimated_cardinality = optional_idx::Invalid();
+	}
+	return estimated_cardinality;
 }
 
 // main switcheroo happens here
@@ -58,42 +89,21 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		}
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		rpc_connection->duckdb_query_result.reset();
+
 		auto statement = rpc_connection->duckdb_connection->Prepare(prepare_request_message.Query());
 		if (statement->HasError()) {
 			return make_uniq<ErrorMessage>(statement->GetError());
 		}
-
-		auto estimated_cardinality = optional_idx::Invalid();
 		if (prepare_request_message.ImmediatelyExecute()) {
-			auto &client_config = ClientConfig::GetConfig(*rpc_connection->duckdb_connection->context);
-			client_config.enable_profiler = true;
-			client_config.profiling_coverage = ProfilingCoverage::ALL;
-			client_config.profiler_settings = {
-			    MetricType::EXTRA_INFO}; // 'EXTRA_INFO' means return estimated cardinality (among other things)
-			client_config.emit_profiler_output = false;
-			// TODO do we need to restore the previous config after this?
-
 			vector<Value> params; // TODO allow parameters here?
 			auto query_result = statement->PendingQuery(params, true)->Execute();
 			if (query_result->HasError()) {
 				return make_uniq<ErrorMessage>(query_result->GetError());
 			}
 			rpc_connection->duckdb_query_result = std::move(query_result);
-
-			// for some reason the profiler is only alive here
-			auto &profiler = QueryProfiler::Get(*rpc_connection->duckdb_connection->context);
-			if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1) {
-				auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
-				// this should always be true, see above
-				D_ASSERT(profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO));
-				auto extra_info_map =
-				    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
-				if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
-					estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
-				}
-			}
 		}
-		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames(), estimated_cardinality);
+		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames(),
+		                                         GetEstimatedCardinality(*rpc_connection->duckdb_connection->context));
 	}
 
 	case MessageType::FETCH_REQUEST: {

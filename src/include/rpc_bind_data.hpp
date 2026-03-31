@@ -13,5 +13,6 @@ struct RpcBindData : FunctionData {
 	string connection_id;
 	string uri;
 	optional_idx estimated_cardinality;
+	unique_ptr<RpcClient> initial_client;
 };
 } // namespace duckdb

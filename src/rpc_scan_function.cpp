@@ -17,13 +17,13 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<RpcBindData>();
 	bind_data->uri = input.inputs[0].GetValue<string>();
-	auto client = RpcClient::GetClient(bind_data->uri);
+	bind_data->initial_client = RpcClient::GetClient(bind_data->uri);
 
 	auto connection_request_response =
-	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	    bind_data->initial_client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
-	auto bind_response = client->MakeRequest<PrepareResponseMessage>(
+	auto bind_response = bind_data->initial_client->MakeRequest<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
 	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
@@ -96,37 +96,39 @@ struct RpcGlobalState : GlobalTableFunctionState {
 };
 
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->Cast<RpcBindData>();
-	auto num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
-
-	idx_t max_threads = 1;
-
-	// small heuristic that scales down the number of threads working on retrieving a result set somewhat gracefully.
-	if (bind_data.estimated_cardinality.IsValid()) {
-		auto min_chunks_per_thread = 10.0; // TODO make this a parameter
-		auto target_threads =
-		    (bind_data.estimated_cardinality.GetIndex() / STANDARD_VECTOR_SIZE / min_chunks_per_thread) * num_threads;
-		if (target_threads > 1) {
-			max_threads = target_threads;
-		}
-		if (target_threads > num_threads) {
-			max_threads = GlobalTableFunctionState::MAX_THREADS;
-		}
-	}
-
-	return make_uniq<RpcGlobalState>(max_threads);
+	// auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	// auto num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
+	//
+	// idx_t max_threads = 1;
+	// // small heuristic that scales down the number of threads working on retrieving a result set somewhat gracefully.
+	// if (bind_data.estimated_cardinality.IsValid()) {
+	// 	auto min_chunks_per_thread = 10.0; // TODO make this a parameter
+	// 	auto target_threads =
+	// 	    (bind_data.estimated_cardinality.GetIndex() / STANDARD_VECTOR_SIZE / min_chunks_per_thread) * num_threads;
+	// 	if (target_threads > 1) {
+	// 		max_threads = target_threads;
+	// 	}
+	// 	if (max_threads > num_threads) {
+	// 		max_threads = GlobalTableFunctionState::MAX_THREADS;
+	// 	}
+	// }
+	return make_uniq<RpcGlobalState>(GlobalTableFunctionState::MAX_THREADS);
 }
 
 unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
                                                  GlobalTableFunctionState *global_state_p) {
-	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
 	auto &global_state = global_state_p->Cast<RpcGlobalState>();
 	if (global_state.done) {
 		return nullptr;
 	}
 	auto local_state = make_uniq<RpcLocalState>();
-	local_state->client = RpcClient::GetClient(bind_data.uri);
-	// TODO re-use client from bind data for first conn
+	// re-use initial client from bind if possible
+	if (bind_data.initial_client) { // TODO possible race here?
+		local_state->client = unique_ptr<RpcClient>(bind_data.initial_client.release());
+	} else {
+		local_state->client = RpcClient::GetClient(bind_data.uri);
+	}
 
 	return local_state;
 }
@@ -150,12 +152,24 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	output.SetCardinality(fetch_response->ResponseData()->size());
 }
 
+static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
+	auto &bind_data = bind_data_p->Cast<RpcBindData>();
+	if (bind_data.estimated_cardinality.IsValid()) {
+		return make_uniq<NodeStatistics>(bind_data.estimated_cardinality.GetIndex());
+	}
+	return nullptr;
+}
+
 TableFunction RpcScanFunction::GetFunction() {
-	return TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
-	                     RpcInitLocal);
+	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
+	                         RpcInitLocal);
+	fun.cardinality = RpcCardinality;
+	return fun;
 }
 
 TableFunction RpcScanByNameFunction::GetFunction() {
-	return TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBindCatalogName,
-	                     RpcInitGlobal, RpcInitLocal);
+	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan,
+	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
+	fun.cardinality = RpcCardinality;
+	return fun;
 }
