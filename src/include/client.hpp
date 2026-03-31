@@ -11,6 +11,7 @@ public:
 	explicit RpcClient(const string &uri_p) : uri(uri_p) {};
 	template <class TARGET>
 	unique_ptr<TARGET> MakeRequest(unique_ptr<ProtocolMessage> request_message) {
+		lock_guard<mutex> guard(request_mutex);
 		//	printf("C SEND %s\n", MessageTypeToString(request_message->Type()).c_str());
 		Send(std::move(request_message));
 		auto response_message = WaitForMessageInternal(TARGET::TYPE).release();
@@ -24,6 +25,7 @@ public:
 	virtual ~RpcClient() {};
 
 protected:
+	mutex request_mutex;
 	MemoryStream read_stream, write_stream;
 	const string uri;
 

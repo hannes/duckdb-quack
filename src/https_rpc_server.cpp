@@ -47,9 +47,13 @@ void HttpsRpcServer::Listen(const string &listen_string_p) {
 		server = make_uniq<duckdb_httplib_openssl::Server>();
 	}
 
-	// TODO make this configurable?
+	// Each keep-alive connection holds a server thread for its lifetime.
+	// We need enough threads to handle all concurrent keep-alive connections
+	// (catalog clients + scan thread clients) simultaneously, otherwise requests
+	// from scan thread clients can deadlock waiting for threads held by the
+	// catalog clients that are in turn waiting for the scan to complete.
 	server->new_task_queue = [] {
-		return new duckdb_httplib_openssl::ThreadPool(/*base_threads=*/8, /*max_threads=*/64);
+		return new duckdb_httplib_openssl::ThreadPool(128);
 	};
 
 	server->Get("/", [=](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res) {
