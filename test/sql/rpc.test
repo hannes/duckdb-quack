@@ -9,56 +9,56 @@ require json
 statement ok
 call rpc_generate_keys();
 
-foreach server  '__TEST_DIR__/duckdb-rpc-socket' 'https://localhost:8080' 'http://localhost:8081'
+foreach server  '{TEST_DIR}/duckdb-rpc-socket' 'https://localhost:8080' 'http://localhost:8081'
 
 statement ok con1
-call rpc_start(${server});
+call rpc_start({server});
 
 
 sleep 1000 millisecond
 
 query I con2
-from rpc_call(${server}, 'select 42')
+from rpc_call({server}, 'select 42')
 ----
 42
 
 statement error con2
-from rpc_call(${server}, '')
+from rpc_call({server}, '')
 ----
 Error
 
 
 statement error con2
-from rpc_call(${server}, 'selexxxct 42')
+from rpc_call({server}, 'selexxxct 42')
 ----
 Error
 
 query I con2
-select max(range) from rpc_call(${server}, 'from range(100000)')
+select max(range) from rpc_call({server}, 'from range(100000)')
 ----
 99999
 
 statement ok con2
-from rpc_call(${server}, 'from test_all_types()')
+from rpc_call({server}, 'from test_all_types()')
 
 
 statement ok con2
-from rpc_call(${server}, 'create table fuu(i integer)')
+from rpc_call({server}, 'create table fuu(i integer)')
 
 statement ok con2
-from rpc_call(${server}, 'insert into fuu values (42)')
+from rpc_call({server}, 'insert into fuu values (42)')
 
 query I ok con2
-from rpc_call(${server}, 'from fuu')
+from rpc_call({server}, 'from fuu')
 ----
 42
 
 statement ok con2
-from rpc_call(${server}, 'drop table fuu')
+from rpc_call({server}, 'drop table fuu')
 
 # some error cases
 statement error con2
-from rpc_call(${server}, NULL)
+from rpc_call({server}, NULL)
 ----
 cannot be NULL
 
@@ -84,7 +84,7 @@ Invalid listen string
 
 
 statement ok con2
-from rpc_call(${server}, 'select 42')
+from rpc_call({server}, 'select 42')
 
 
 # this very involved method makes sure we get some cardinalities
@@ -95,16 +95,16 @@ statement ok con2
 set enable_profiling='json'
 
 statement ok con2
-set profiling_output='__TEST_DIR__/profile_cardinality_1.json'
+set profiling_output='{TEST_DIR}/profile_cardinality_1.json'
 
 statement ok con2
-from rpc_call(${server}, 'from my_range')
+from rpc_call({server}, 'from my_range')
 
 statement ok con2
 set enable_profiling='no_output'
 
 query I con2
-from read_json('__TEST_DIR__/profile_cardinality_1.json') select children[1].extra_info."Estimated Cardinality"::INT ec
+from read_json('{TEST_DIR}/profile_cardinality_1.json') select children[1].extra_info."Estimated Cardinality"::INT ec
 ----
 4242
 
@@ -112,16 +112,16 @@ statement ok con2
 set enable_profiling='json'
 
 statement ok con2
-set profiling_output='__TEST_DIR__/profile_cardinality_2.json'
+set profiling_output='{TEST_DIR}/profile_cardinality_2.json'
 
 statement ok con2
-from rpc_call(${server}, 'from my_range limit 2121')
+from rpc_call({server}, 'from my_range limit 2121')
 
 statement ok con2
 set enable_profiling='no_output'
 
 query I con2
-from read_json('__TEST_DIR__/profile_cardinality_2.json') select children[1].extra_info."Estimated Cardinality"::INT ec
+from read_json('{TEST_DIR}/profile_cardinality_2.json') select children[1].extra_info."Estimated Cardinality"::INT ec
 ----
 2121
 
@@ -131,14 +131,14 @@ drop table my_range
 
 
 statement ok con 1
-call rpc_stop(${server})
+call rpc_stop({server})
 
 statement ok con 1
-call rpc_stop(${server})
+call rpc_stop({server})
 
 
 statement error con2
-from rpc_call(${server}, 'select 42')
+from rpc_call({server}, 'select 42')
 ----
 IO Error
 

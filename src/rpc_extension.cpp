@@ -39,23 +39,20 @@ static void RpcAuthToken(DataChunk &args, ExpressionState &, Vector &result) {
 	D_ASSERT(args.size() == 2);
 	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
-
-	auto auth_str = args.GetValue(0, 0).GetValue<string>();
-
 	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
+
+	auto auth_str = args.GetValue(1, 0).GetValue<string>();
 	result.SetValue(0, Value(auth_str == "mellon")); // speak 'friend' and enter
 }
 
 // pass session id
-static void RpcAuthorization(DataChunk &args, ExpressionState &, Vector &result) {
+static void RpcDummyAuthorization(DataChunk &args, ExpressionState &, Vector &result) {
 	D_ASSERT(args.size() == 2);
 	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
-
-	auto auth_str = args.GetValue(0, 0).GetValue<string>();
-
 	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
-	result.SetValue(0, Value(true));
+
+	result.SetValue(0, Value(true)); // choose life
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
@@ -74,9 +71,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                              LogicalType::BOOLEAN, RpcAuthToken);
 	loader.RegisterFunction(rpc_auth_token);
 
-	ScalarFunction rpc_authorization("rpc_authorization",
+	ScalarFunction rpc_authorization("rpc_dummy_authorization",
 	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
-	                                 LogicalType::BOOLEAN, RpcAuthorization);
+	                                 LogicalType::BOOLEAN, RpcDummyAuthorization);
 	loader.RegisterFunction(rpc_authorization);
 
 	// (ab)use storage extension info to store our state
@@ -88,8 +85,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
 	config.AddExtensionOption("rpc_authentication_function", "Name of a callback function for authentication",
 	                          LogicalType::VARCHAR, Value("rpc_auth_token"));
-	config.AddExtensionOption("rpc_authorization", "Name of a callback function for authorization",
-	                          LogicalType::VARCHAR, Value("rpc_authorization"));
+	config.AddExtensionOption("rpc_authorization_function", "Name of a callback function for authorization",
+	                          LogicalType::VARCHAR, Value("rpc_dummy_authorization"));
 }
 
 void RpcExtension::Load(ExtensionLoader &loader) {

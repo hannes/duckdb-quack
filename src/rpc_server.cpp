@@ -77,44 +77,55 @@ static optional_idx GetEstimatedCardinality(ClientContext &context) {
 	return estimated_cardinality;
 }
 
+static string GetSettingString(DatabaseInstance &db, const string &setting_name) {
+	Value setting_val;
+	auto &config = DBConfig::GetConfig(db);
+
+	auto lookup_result = config.TryGetCurrentSetting(setting_name, setting_val);
+	D_ASSERT(lookup_result);
+	D_ASSERT(setting_val.type().id() == LogicalTypeId::VARCHAR);
+	auto setting_str = setting_val.GetValue<string>();
+	D_ASSERT(!setting_str.empty());
+	return setting_str;
+}
+
+static string CreateSessionId() {
+	string session_id_bytes;
+	session_id_bytes.resize(32);
+	// we force the use of the (safer) OpenSSL random generator here, the session ids should really not be
+	// predictable
+	if (!RAND_bytes((unsigned char *)session_id_bytes.data(), session_id_bytes.size())) {
+		throw InternalException("RAND_bytes failed");
+	}
+	auto session_id = Blob::ToBase64(session_id_bytes);
+	D_ASSERT(!session_id.empty());
+	return session_id;
+}
+
+template <typename... ARGS>
+static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... values) {
+	Connection dummy_connection(db);
+	auto auth_result = dummy_connection.Query(sql, values...);
+	if (!auth_result || auth_result->HasError()) {
+		return false;
+	}
+	auto auth_result_chunk = auth_result->Fetch();
+	if (!auth_result_chunk || !auth_result_chunk->GetValue(0, 0).template GetValue<bool>()) {
+		return false;
+	}
+	return true;
+}
+
 // main switcheroo happens here
 unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
-		string auth_function_name;
-		{
-			auto &config = DBConfig::GetConfig(*db);
-			Value auth_function_name_value;
-			auto lookup_result = config.TryGetCurrentSetting("rpc_authentication_function", auth_function_name_value);
-			D_ASSERT(lookup_result);
-			D_ASSERT(auth_function_name_value.type().id() == LogicalTypeId::VARCHAR);
-			auth_function_name = auth_function_name_value.GetValue<string>();
-			D_ASSERT(!auth_function_name.empty());
-		}
-		string session_id;
-		{
-			// we force the use of the (safer) OpenSSL random generator here, the session ids should really not be
-			// predictable
-			string session_id_bytes;
-			session_id_bytes.resize(32);
-			if (!RAND_bytes((unsigned char *)session_id_bytes.data(), session_id.size())) {
-				throw InternalException("RAND_bytes failed");
-			}
-			session_id = Blob::ToBase64(session_id_bytes);
-		}
-		{
-			Connection dummy_connection(*db);
-			auto auth_result =
-			    dummy_connection.Query(StringUtil::Format("SELECT %s(?, ?)", auth_function_name), Value(session_id),
-			                           Value(connection_request_message.AuthString()));
-			if (!auth_result || auth_result->HasError()) {
-				return make_uniq<ErrorMessage>("Authentication Failed");
-			}
-			auto auth_result_chunk = auth_result->Fetch();
-			if (!auth_result_chunk || auth_result_chunk->GetValue(0, 0).GetValue<bool>()) {
-				return make_uniq<ErrorMessage>("Authentication Failed");
-			}
+		string session_id = CreateSessionId();
+		if (!EvaluateAuthQuery(
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authentication_function")),
+		        Value(session_id), Value(connection_request_message.AuthString()))) {
+			return make_uniq<ErrorMessage>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
 	}
@@ -124,6 +135,13 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 		if (!rpc_connection) {
 			return make_uniq<ErrorMessage>("Invalid connection id");
 		}
+
+		if (!EvaluateAuthQuery(
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authorization_function")),
+		        Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()))) {
+			return make_uniq<ErrorMessage>("Authorization failed");
+		}
+
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 		rpc_connection->duckdb_query_result.reset();
 
