@@ -42,7 +42,7 @@ public:
 	virtual void Listen(const string &listen_string) {};
 
 	optional_ptr<RpcConnection> GetConnection(const string &connection_id);
-	string CreateNewConnection();
+	string CreateNewConnection(const string &session_id);
 	// TODO need something to destroy connections
 
 	virtual ~RpcServer();

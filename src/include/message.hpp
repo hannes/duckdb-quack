@@ -125,10 +125,16 @@ class ConnectionRequestMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CONNECTION_REQUEST;
 
-	ConnectionRequestMessage() : ProtocolMessage(TYPE) {
+	ConnectionRequestMessage(const string &auth_string_p) : ProtocolMessage(TYPE), auth_string(auth_string_p) {
+	}
+	const std::string &AuthString() const {
+		return auth_string;
 	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
+
+private:
+	string auth_string;
 };
 
 class ConnectionResponseMessage : public ProtocolMessage {

@@ -73,7 +73,8 @@ void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 
 RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string_p)
     : Catalog(db_p), server_string(server_string_p), client(RpcClient::GetClient(server_string)) {
-	auto connection_response = client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	auto connection_response =
+	    client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>("mellon"));
 	connection_id = connection_response->ConnectionId();
 
 	// TODO a tiiny bit clunky this

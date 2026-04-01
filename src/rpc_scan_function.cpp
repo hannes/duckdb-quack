@@ -19,8 +19,8 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	bind_data->uri = input.inputs[0].GetValue<string>();
 	bind_data->initial_client = RpcClient::GetClient(bind_data->uri);
 
-	auto connection_request_response =
-	    bind_data->initial_client->MakeRequest<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>());
+	auto connection_request_response = bind_data->initial_client->MakeRequest<ConnectionResponseMessage>(
+	    make_uniq<ConnectionRequestMessage>("mellon"));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = bind_data->initial_client->MakeRequest<PrepareResponseMessage>(

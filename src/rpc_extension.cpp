@@ -34,6 +34,30 @@ public:
 	}
 };
 
+// pass session id
+static void RpcAuthToken(DataChunk &args, ExpressionState &, Vector &result) {
+	D_ASSERT(args.size() == 2);
+	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
+	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
+
+	auto auth_str = args.GetValue(0, 0).GetValue<string>();
+
+	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
+	result.SetValue(0, Value(auth_str == "mellon")); // speak 'friend' and enter
+}
+
+// pass session id
+static void RpcAuthorization(DataChunk &args, ExpressionState &, Vector &result) {
+	D_ASSERT(args.size() == 2);
+	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
+	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
+
+	auto auth_str = args.GetValue(0, 0).GetValue<string>();
+
+	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
+	result.SetValue(0, Value(true));
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.SetDescription("Adds support for DuckDB Remote Procedure Calls (RPC)");
 
@@ -44,11 +68,28 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(RpcStopFunction::GetFunction());
 	loader.RegisterFunction(RpcGenerateKeysFunction::GetFunction());
 
+	// the default authentication function
+	ScalarFunction rpc_auth_token("rpc_auth_token",
+	                              {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
+	                              LogicalType::BOOLEAN, RpcAuthToken);
+	loader.RegisterFunction(rpc_auth_token);
+
+	ScalarFunction rpc_authorization("rpc_authorization",
+	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
+	                                 LogicalType::BOOLEAN, RpcAuthorization);
+	loader.RegisterFunction(rpc_authorization);
+
 	// (ab)use storage extension info to store our state
 	auto ext = duckdb::make_shared_ptr<RpcStorageExtension>();
 	ext->storage_info = duckdb::make_uniq<RpcStorageExtensionInfo>();
 	StorageExtension::Register(loader.GetDatabaseInstance().config, RpcStorageExtensionInfo::STORAGE_EXTENSION_KEY,
 	                           ext);
+
+	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
+	config.AddExtensionOption("rpc_authentication_function", "Name of a callback function for authentication",
+	                          LogicalType::VARCHAR, Value("rpc_auth_token"));
+	config.AddExtensionOption("rpc_authorization", "Name of a callback function for authorization",
+	                          LogicalType::VARCHAR, Value("rpc_authorization"));
 }
 
 void RpcExtension::Load(ExtensionLoader &loader) {

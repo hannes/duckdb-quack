@@ -6,10 +6,15 @@
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/render_tree.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
+#include "duckdb/execution/expression_executor.hpp"
 
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
 #include "duckdb/planner/binder.hpp"
+#include "duckdb/storage/temporary_file_manager.hpp"
+#include "duckdb/main/database.hpp"
+#include <openssl/rand.h>
+#include "duckdb/common/types/blob.hpp"
 
 using namespace duckdb;
 
@@ -30,11 +35,10 @@ optional_ptr<RpcConnection> RpcServer::GetConnection(const string &connection_id
 	return nullptr;
 }
 
-string RpcServer::CreateNewConnection() {
+string RpcServer::CreateNewConnection(const string &session_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
-	// TODO this will need cryptographic randomness I fear
-	auto connection_id = StringUtil::GenerateRandomName(40);
-	D_ASSERT(active_connections.find(connection_id) == active_connections.end());
+
+	D_ASSERT(active_connections.find(session_id) == active_connections.end());
 
 	auto new_connection = make_uniq<RpcConnection>();
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
@@ -49,8 +53,8 @@ string RpcServer::CreateNewConnection() {
 	client_config.profiler_settings = {
 	    MetricType::EXTRA_INFO}; // 'EXTRA_INFO' means return estimated cardinality (among other things)
 
-	active_connections[connection_id] = std::move(new_connection);
-	return connection_id;
+	active_connections[session_id] = std::move(new_connection);
+	return session_id;
 }
 
 // try to get an estimated cardinality from the profiler, orrr
@@ -78,8 +82,41 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
-		// TODO handle auth here! Only return a connection ID if auth succeeds.
-		return make_uniq<ConnectionResponseMessage>(CreateNewConnection());
+		string auth_function_name;
+		{
+			auto &config = DBConfig::GetConfig(*db);
+			Value auth_function_name_value;
+			auto lookup_result = config.TryGetCurrentSetting("rpc_authentication_function", auth_function_name_value);
+			D_ASSERT(lookup_result);
+			D_ASSERT(auth_function_name_value.type().id() == LogicalTypeId::VARCHAR);
+			auth_function_name = auth_function_name_value.GetValue<string>();
+			D_ASSERT(!auth_function_name.empty());
+		}
+		string session_id;
+		{
+			// we force the use of the (safer) OpenSSL random generator here, the session ids should really not be
+			// predictable
+			string session_id_bytes;
+			session_id_bytes.resize(32);
+			if (!RAND_bytes((unsigned char *)session_id_bytes.data(), session_id.size())) {
+				throw InternalException("RAND_bytes failed");
+			}
+			session_id = Blob::ToBase64(session_id_bytes);
+		}
+		{
+			Connection dummy_connection(*db);
+			auto auth_result =
+			    dummy_connection.Query(StringUtil::Format("SELECT %s(?, ?)", auth_function_name), Value(session_id),
+			                           Value(connection_request_message.AuthString()));
+			if (!auth_result || auth_result->HasError()) {
+				return make_uniq<ErrorMessage>("Authentication Failed");
+			}
+			auto auth_result_chunk = auth_result->Fetch();
+			if (!auth_result_chunk || auth_result_chunk->GetValue(0, 0).GetValue<bool>()) {
+				return make_uniq<ErrorMessage>("Authentication Failed");
+			}
+		}
+		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
 	}
 	case MessageType::PREPARE_REQUEST: {
 		auto &prepare_request_message = received_message.Cast<PrepareRequestMessage>();

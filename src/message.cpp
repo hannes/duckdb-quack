@@ -119,10 +119,12 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
+	serializer.WriteProperty<string>(80, "auth_string", auth_string);
 }
 
 unique_ptr<ProtocolMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
-	return make_uniq<ConnectionRequestMessage>();
+	auto auth_string = deserializer.ReadProperty<string>(80, "auth_string");
+	return make_uniq<ConnectionRequestMessage>(auth_string);
 }
 
 void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
