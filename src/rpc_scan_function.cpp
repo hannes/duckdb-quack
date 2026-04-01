@@ -96,22 +96,17 @@ struct RpcGlobalState : GlobalTableFunctionState {
 };
 
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
-	// auto &bind_data = input.bind_data->Cast<RpcBindData>();
-	// auto num_threads = TaskScheduler::GetScheduler(context).NumberOfThreads();
-	//
-	// idx_t max_threads = 1;
-	// // small heuristic that scales down the number of threads working on retrieving a result set somewhat gracefully.
-	// if (bind_data.estimated_cardinality.IsValid()) {
-	// 	auto min_chunks_per_thread = 10.0; // TODO make this a parameter
-	// 	auto target_threads =
-	// 	    (bind_data.estimated_cardinality.GetIndex() / STANDARD_VECTOR_SIZE / min_chunks_per_thread) * num_threads;
-	// 	if (target_threads > 1) {
-	// 		max_threads = target_threads;
-	// 	}
-	// 	if (max_threads > num_threads) {
-	// 		max_threads = GlobalTableFunctionState::MAX_THREADS;
-	// 	}
-	// }
+	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+
+	// For the catalog path (ATTACH), LookupEntry only prepares without executing
+	// to avoid the server-side result being overwritten by subsequent lookups.
+	// We execute the query here, right before scanning, so the result is fresh.
+	if (!bind_data.table_name.empty()) {
+		auto client = RpcClient::GetClient(bind_data.uri);
+		client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
+		    bind_data.connection_id, StringUtil::Format("FROM %s", bind_data.table_name), true));
+	}
+
 	return make_uniq<RpcGlobalState>(GlobalTableFunctionState::MAX_THREADS);
 }
 
