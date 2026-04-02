@@ -56,7 +56,7 @@ unique_ptr<GlobalSinkState> RpcInsert::GetGlobalSinkState(ClientContext &context
 	auto catalog_request_message =
 	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
 	auto catalog_response =
-	    rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	    rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 	auto entry = make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(
 	    rpc_schema.catalog, rpc_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
 	return make_uniq<RpcInsertGlobalState>(std::move(entry));
@@ -74,7 +74,7 @@ SinkResultType RpcInsert::Sink(ExecutionContext &context, DataChunk &chunk, Oper
 	append_chunk->Reference(chunk);
 	auto append_message = make_uniq<AppendRequestMessage>(rpc_catalog.GetConnectionId(), tbl.schema.name, tbl.name,
 	                                                      std::move(append_chunk));
-	rpc_catalog.GetRawClient().MakeRequest<AppendResponseMessage>(std::move(append_message));
+	rpc_catalog.GetRawClient().Request<AppendResponseMessage>(std::move(append_message));
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;
 }

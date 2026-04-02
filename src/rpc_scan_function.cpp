@@ -36,11 +36,11 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 		throw InvalidConfigurationException("No RPC token found");
 	}
 
-	auto connection_request_response = bind_data->initial_client->MakeRequest<ConnectionResponseMessage>(
+	auto connection_request_response = bind_data->initial_client->Request<ConnectionResponseMessage>(
 	    make_uniq<ConnectionRequestMessage>(default_token_val.GetValue<string>()));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
-	auto bind_response = bind_data->initial_client->MakeRequest<PrepareResponseMessage>(
+	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
 	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
@@ -83,7 +83,7 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	bind_data->uri = rpc_catalog.GetServerString();
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
 
-	auto bind_response = rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(
+	auto bind_response = rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
 	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
@@ -207,8 +207,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = RpcClient::GetClient(bind_data.uri);
-		client->MakeRequest<PrepareResponseMessage>(
-		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
+		client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 	}
 
 	return make_uniq<RpcGlobalState>(GlobalTableFunctionState::MAX_THREADS);
@@ -241,7 +240,7 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 		return;
 	}
 	auto fetch_response =
-	    local_state.client->MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
+	    local_state.client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
 	if (!fetch_response->ResponseData() || fetch_response->ResponseData()->size() == 0) {
 		global_state.done = true;
 		return;

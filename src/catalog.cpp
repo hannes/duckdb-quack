@@ -81,7 +81,7 @@ RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const string &server_string_p)
 	auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
 	D_ASSERT(lookup_result_token);
 
-	auto connection_response = client->MakeRequest<ConnectionResponseMessage>(
+	auto connection_response = client->Request<ConnectionResponseMessage>(
 	    make_uniq<ConnectionRequestMessage>(default_token_val.GetValue<string>()));
 	connection_id = connection_response->ConnectionId();
 
@@ -126,10 +126,10 @@ const string &RpcCatalog::GetServerString() {
 unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query) {
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	auto response =
-	    client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query, true));
+	    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query, true));
 	chunk_collection->Initialize(response->Types());
 	while (true) {
-		auto fetch_response = client->MakeRequest<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
+		auto fetch_response = client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
 		if (!fetch_response || !fetch_response->ResponseData() || fetch_response->ResponseData()->size() == 0) {
 			break;
 		}
@@ -164,7 +164,7 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 
 	try {
 		auto bind_response =
-		    rpc_catalog.GetRawClient().MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
+		    rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
 		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), false));
 		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
 			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
@@ -194,7 +194,7 @@ optional_ptr<CatalogEntry> RpcCatalog::CreateSchema(CatalogTransaction transacti
 	create_schema_info->catalog = "memory";
 
 	auto catalog_request_message = make_uniq<CatalogRequestMessage>(GetConnectionId(), std::move(create_schema_info));
-	auto catalog_response = GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	auto catalog_response = GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 	return make_uniq_base<CatalogEntry, RpcSchemaCatalogEntry>(
 	    *this, catalog_response->GetParseInfo()->Cast<CreateSchemaInfo>());
 }
@@ -264,7 +264,7 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::CreateTable(CatalogTransaction
 	auto catalog_request_message =
 	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
 	auto catalog_response =
-	    rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	    rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 	return make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(
 	    catalog, *this, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
 }
@@ -306,7 +306,7 @@ void RpcSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p) 
 	auto catalog_request_message =
 	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(drop_info));
 
-	rpc_catalog.GetRawClient().MakeRequest<CatalogResponseMessage>(std::move(catalog_request_message));
+	rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 }
 void RpcSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	throw NotImplementedException("Alter not implemented yet, Alter!");
