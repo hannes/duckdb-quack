@@ -17,7 +17,11 @@ namespace duckdb {
 static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                      AttachedDatabase &db, const string &name, AttachInfo &info,
                                      AttachOptions &attach_options) {
-	return make_uniq<RpcCatalog>(db, "quack:" + info.path);
+	auto diable_ssl = attach_options.options.find("disable_ssl") != attach_options.options.end() &&
+	                  attach_options.options["disable_ssl"].GetValue<bool>();
+	auto uri = make_uniq<RpcUri>("quack:" + info.path, !diable_ssl);
+
+	return make_uniq<RpcCatalog>(db, std::move(uri));
 }
 
 static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,

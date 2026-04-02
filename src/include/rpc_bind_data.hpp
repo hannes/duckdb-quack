@@ -1,4 +1,4 @@
-#include "duckdb/function/table_function.hpp"
+#pragma once
 
 namespace duckdb {
 class RpcClient;
@@ -11,7 +11,7 @@ struct RpcBindData : FunctionData {
 		throw NotImplementedException("Copy not implemented");
 	}
 	string connection_id;
-	string uri;
+	unique_ptr<RpcUri> server_uri;
 	string table_name;
 	optional_idx estimated_cardinality;
 	unique_ptr<RpcClient> initial_client;

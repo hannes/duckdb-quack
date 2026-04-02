@@ -28,14 +28,8 @@ void HttpsRpcServer::ListenThread(HttpsRpcServer *rpc_server, const string &list
 	rpc_server->server->listen(listen_host, listen_port);
 }
 
-void HttpsRpcServer::Listen(const string &listen_uri) {
-	RpcUri parsed_uri(listen_uri);
-
-	// we construct this client solely to parse the host/port url
-	duckdb_httplib_openssl::Client dummy_client(parsed_uri.Http());
-	bool use_https = dummy_client.ssl_context() != nullptr;
-
-	if (use_https) {
+void HttpsRpcServer::Listen(const RpcUri &uri) {
+	if (uri.Ssl()) {
 		auto &fs = FileSystem::GetFileSystem(*db);
 		// TODO make this configurable
 		auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
@@ -72,8 +66,8 @@ void HttpsRpcServer::Listen(const string &listen_uri) {
 	});
 
 	if (!server->is_valid()) {
-		throw IOException("Failed to instantiate Quack RPC server at %s / %s", listen_uri, parsed_uri.Http());
+		throw IOException("Failed to instantiate Quack RPC server at %s / %s", uri.Uri(), uri.Http());
 	}
 
-	listen_threads.push_back(std::thread(ListenThread, this, dummy_client.host(), dummy_client.port()));
+	listen_threads.push_back(std::thread(ListenThread, this, uri.Host(), uri.Port()));
 }

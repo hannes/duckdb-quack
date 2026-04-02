@@ -13,22 +13,22 @@ RpcStorageExtensionInfo &RpcStorageExtensionInfo::GetState(const DatabaseInstanc
 	return *static_cast<RpcStorageExtensionInfo *>(ext->storage_info.get());
 }
 
-RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const std::string &listen_string) {
+RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, const RpcUri &listen_uri) {
 	std::lock_guard lock(servers_mutex);
-	auto it = servers.find(listen_string);
+	auto it = servers.find(listen_uri.Uri());
 	if (it != servers.end()) {
 		return *it->second;
 	}
 	unique_ptr<RpcServer> server;
 	server = make_uniq<HttpsRpcServer>(context);
-	server->Listen(listen_string);
-	servers.emplace(listen_string, std::move(server));
-	return *servers[listen_string];
+	server->Listen(listen_uri);
+	servers.emplace(listen_uri.Uri(), std::move(server));
+	return *servers[listen_uri.Uri()];
 }
 
-bool RpcStorageExtensionInfo::StopServer(ClientContext &context, const std::string &listen_string) {
+bool RpcStorageExtensionInfo::StopServer(ClientContext &context, const RpcUri &listen_uri) {
 	std::lock_guard lock(servers_mutex);
-	const auto it = servers.find(listen_string);
+	const auto it = servers.find(listen_uri.Uri());
 	if (it == servers.end()) {
 		return false;
 	}

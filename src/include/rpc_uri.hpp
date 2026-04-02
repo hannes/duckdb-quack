@@ -7,7 +7,7 @@ namespace duckdb {
 
 class RpcUri {
 public:
-	RpcUri(string uri, bool ssl_p = true) : ssl(ssl_p) {
+	RpcUri(string uri_p, bool ssl_p = true) : ssl(ssl_p), uri(uri_p) {
 		// we should really instantiate a parser here instead, but alas
 		// whitespace be gone
 		StringUtil::Trim(uri);
@@ -64,6 +64,9 @@ public:
 	string Http() const {
 		return http;
 	}
+	string Uri() const {
+		return uri;
+	}
 	string Host() const {
 		return host;
 	}
@@ -83,6 +86,7 @@ private:
 	string host = "localhost";
 	uint16_t port = 1294; // default port!
 	string http;
+	string uri;
 };
 
 } // namespace duckdb

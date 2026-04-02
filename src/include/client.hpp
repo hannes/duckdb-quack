@@ -11,7 +11,7 @@ namespace duckdb {
 
 class RpcClient {
 public:
-	explicit RpcClient(const string &uri_p) : uri(uri_p) {};
+	explicit RpcClient(const RpcUri &uri_p) : uri(uri_p) {};
 
 	template <class TARGET>
 	unique_ptr<TARGET> Request(unique_ptr<ProtocolMessage> request_message) {
@@ -29,7 +29,7 @@ public:
 		return unique_ptr<TARGET>(reinterpret_cast<TARGET *>(response_message));
 	}
 
-	static unique_ptr<RpcClient> GetClient(const string &uri);
+	static unique_ptr<RpcClient> GetClient(const RpcUri &uri);
 
 	virtual ~RpcClient() {};
 
@@ -44,7 +44,7 @@ private:
 
 class HttpsRpcClient : public RpcClient {
 public:
-	HttpsRpcClient(const string &uri_p);
+	HttpsRpcClient(const RpcUri &uri_p);
 	~HttpsRpcClient() override;
 
 private:

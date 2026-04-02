@@ -9,8 +9,8 @@ class RpcStorageExtensionInfo : public StorageExtensionInfo {
 public:
 	static RpcStorageExtensionInfo &GetState(const DatabaseInstance &instance);
 
-	RpcServer &FindOrCreateServer(ClientContext &context, const std::string &listen_string);
-	bool StopServer(ClientContext &context, const std::string &listen_string);
+	RpcServer &FindOrCreateServer(ClientContext &context, const RpcUri &listen_uri);
+	bool StopServer(ClientContext &context, const RpcUri &listen_uri);
 
 	static constexpr const char *STORAGE_EXTENSION_KEY = "rpc";
 

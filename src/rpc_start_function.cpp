@@ -16,32 +16,37 @@ struct RpcStartStopFunctionData : public TableFunctionData {
 
 	bool finished = false;
 	bool auth_is_default = false;
-	string listen_string;
+	unique_ptr<RpcUri> listen_uri;
 };
 
-static unique_ptr<FunctionData> RpcStartStopBind(ClientContext &context, TableFunctionBindInput &input,
-                                                 vector<LogicalType> &return_types, vector<string> &names) {
-	auto result = make_uniq<RpcStartStopFunctionData>();
+static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFunctionBindInput &input,
+                                             vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<RpcStartStopFunctionData>();
 	auto &uri_value = input.inputs[0];
 	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
 		throw InvalidInputException("Invalid listen string specified");
 	}
-	result->listen_string = input.inputs[0].GetValue<string>();
+	auto disable_ssl = input.named_parameters.find("disable_ssl") != input.named_parameters.end() &&
+	                   input.named_parameters["disable_ssl"].GetValue<bool>();
+	bind_data->listen_uri = make_uniq<RpcUri>(uri_value.GetValue<string>(), !disable_ssl);
+
 	return_types.emplace_back(LogicalType::VARCHAR);
-	names.emplace_back("listen_address");
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("listen_uri");
+	names.emplace_back("listen_url");
 
 	auto &config = DBConfig::GetConfig(context);
 	Value default_auth_val;
 	auto lookup_result_token = config.TryGetCurrentSetting("rpc_authentication_function", default_auth_val);
-	result->auth_is_default =
+	bind_data->auth_is_default =
 	    lookup_result_token && !default_auth_val.IsNull() && default_auth_val.GetValue<string>() == "rpc_auth_token";
 
-	if (result->auth_is_default) {
+	if (bind_data->auth_is_default) {
 		return_types.emplace_back(LogicalType::VARCHAR);
 		names.emplace_back("auth_token");
 	}
 
-	return std::move(result);
+	return std::move(bind_data);
 }
 
 static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
@@ -50,8 +55,9 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 		return;
 	}
 
-	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_string);
-	output.SetValue(0, 0, bind_data.listen_string);
+	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, *bind_data.listen_uri);
+	output.SetValue(0, 0, bind_data.listen_uri->Uri());
+	output.SetValue(1, 0, bind_data.listen_uri->Http());
 
 	// generate default token if not set
 	if (bind_data.auth_is_default) {
@@ -70,8 +76,7 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 		D_ASSERT(lookup_result_token);
 		D_ASSERT(!default_token_val.IsNull());
 		D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
-		output.data[1].SetValue(0, default_token_val.GetValue<string>());
-		output.SetValue(1, 0, default_token_val.GetValue<string>());
+		output.SetValue(2, 0, default_token_val.GetValue<string>());
 	}
 
 	output.SetCardinality(1);
@@ -80,7 +85,24 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 
 TableFunction RpcStartFunction::GetFunction() {
 	// TODO add a named parameter to specify where the keys are
-	return TableFunction("rpc_start", {LogicalType::VARCHAR}, RpcStartFun, RpcStartStopBind);
+	auto fun = TableFunction("rpc_start", {LogicalType::VARCHAR}, RpcStartFun, RpcStartBind);
+	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
+	return fun;
+}
+
+static unique_ptr<FunctionData> RpcStopBind(ClientContext &context, TableFunctionBindInput &input,
+                                            vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<RpcStartStopFunctionData>();
+	auto &uri_value = input.inputs[0];
+	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
+		throw InvalidInputException("Invalid listen string specified");
+	}
+	bind_data->listen_uri =
+	    make_uniq<RpcUri>(uri_value.GetValue<string>(), /* not really but we don't want to ask the user again */ true);
+	return_types.emplace_back(LogicalType::VARCHAR);
+	names.emplace_back("status");
+
+	return std::move(bind_data);
 }
 
 static void RpcStopFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
@@ -89,17 +111,17 @@ static void RpcStopFun(ClientContext &context, TableFunctionInput &data_p, DataC
 		return;
 	}
 	auto &rpc_state = RpcStorageExtensionInfo::GetState(*context.db);
-	if (rpc_state.StopServer(context, bind_data.listen_string)) {
-		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_string));
+	if (rpc_state.StopServer(context, *bind_data.listen_uri)) {
+		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_uri->Uri()));
 	} else {
-		output.data[0].SetValue(0, StringUtil::Format("No server found listening on %s", bind_data.listen_string));
+		output.data[0].SetValue(0, StringUtil::Format("No server found listening on %s", bind_data.listen_uri->Uri()));
 	}
 	output.SetCardinality(1);
 	bind_data.finished = true;
 }
 
 TableFunction RpcStopFunction::GetFunction() {
-	return TableFunction("rpc_stop", {LogicalType::VARCHAR}, RpcStopFun, RpcStartStopBind);
+	return TableFunction("rpc_stop", {LogicalType::VARCHAR}, RpcStopFun, RpcStopBind);
 }
 
 struct RpcGenerateKeysFunctionData : public TableFunctionData {

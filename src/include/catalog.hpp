@@ -104,7 +104,7 @@ private:
 
 class RpcCatalog : public Catalog {
 public:
-	explicit RpcCatalog(AttachedDatabase &db_p, const string &server_string);
+	explicit RpcCatalog(AttachedDatabase &db_p, unique_ptr<RpcUri> server_uri_p);
 	~RpcCatalog();
 
 public:
@@ -137,14 +137,14 @@ public:
 	string GetDBPath() override;
 
 	unique_ptr<ColumnDataCollection> ExecuteCommand(const string &query);
-	const string &GetServerString();
+	const RpcUri &GetServerUri();
 	const string &GetConnectionId();
 
 	RpcClient &GetRawClient();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
-	string server_string;
+	unique_ptr<RpcUri> server_uri;
 	unique_ptr<RpcClient> client;
 	string connection_id;
 	unordered_map<string, unique_ptr<RpcSchemaCatalogEntry>> schemas;

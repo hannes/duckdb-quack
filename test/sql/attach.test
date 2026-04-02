@@ -18,18 +18,20 @@ statement ok
 call rpc_generate_keys();
 
 foreach server 'quack:localhost'
-# 'wss://localhost:1294'
+
+foreach ssl false true
+
 
 statement ok con1
-call rpc_start({server});
+call rpc_start({server}, disable_ssl={ssl});
 
 query II con2
-from rpc_call({server}, 'select 42, 43')
+from rpc_call({server}, 'select 42, 43', disable_ssl={ssl})
 ----
 42	43
 
 statement ok con2
-attach {server} as rpc (TYPE rpc)
+attach {server} as rpc (TYPE rpc, disable_ssl {ssl})
 
 query II
 from rpc.fuu;
@@ -132,8 +134,10 @@ statement ok con1
 call rpc_stop({server});
 
 statement error con2
-attach {server} as rpc (TYPE rpc)
+attach {server} as rpc (TYPE rpc, disable_ssl {ssl})
 ----
 Failed to send message
+
+endloop
 
 endloop

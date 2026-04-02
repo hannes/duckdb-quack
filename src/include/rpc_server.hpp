@@ -5,6 +5,7 @@
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/mutex.hpp"
 #include "duckdb/common/shared_ptr.hpp"
+#include "rpc_uri.hpp"
 
 #include <thread>
 
@@ -39,7 +40,7 @@ class RpcServer {
 public:
 	explicit RpcServer(ClientContext &context_p);
 	// TODO should listen be part of the constructor?
-	virtual void Listen(const string &listen_string) {};
+	virtual void Listen(const RpcUri &uri) {};
 
 	optional_ptr<RpcConnection> GetConnection(const string &connection_id);
 	string CreateNewConnection(const string &session_id);
@@ -64,7 +65,7 @@ class HttpsRpcServer : public RpcServer {
 public:
 	HttpsRpcServer(ClientContext &context_p) : RpcServer(context_p) {
 	}
-	void Listen(const string &listen_string) override;
+	void Listen(const RpcUri &uri) override;
 
 	~HttpsRpcServer() override;
 

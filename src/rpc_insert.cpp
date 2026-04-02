@@ -8,10 +8,10 @@
 #include "duckdb/execution/operator/scan/physical_table_scan.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
-#include "include/catalog.hpp"
+#include "catalog.hpp"
 #include "message.hpp"
 
-namespace duckdb {
+using namespace duckdb;
 
 RpcInsert::RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
                      physical_index_vector_t<idx_t> column_index_map_p)
@@ -126,5 +126,3 @@ PhysicalOperator &RpcCatalog::PlanCreateTableAs(ClientContext &context, Physical
 	insert.children.push_back(plan);
 	return insert;
 }
-
-} // namespace duckdb

@@ -14,7 +14,7 @@ string GetUriPart(T ele) {
 	return string(ele.first, ele.afterLast - ele.first);
 }
 
-HttpsRpcClient::HttpsRpcClient(const string &uri_p) : RpcClient(uri_p) {
+HttpsRpcClient::HttpsRpcClient(const RpcUri &uri_p) : RpcClient(uri_p) {
 	https_client = make_uniq<duckdb_httplib_openssl::Client>(uri.Http());
 	if (uri.Ssl()) {
 		https_client->enable_server_certificate_verification(false);
@@ -40,6 +40,6 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	return ProtocolMessage::FromMemoryStream(non_owning_read_stream);
 }
 
-unique_ptr<RpcClient> RpcClient::GetClient(const string &uri) {
+unique_ptr<RpcClient> RpcClient::GetClient(const RpcUri &uri) {
 	return make_uniq<HttpsRpcClient>(uri);
 }

@@ -9,9 +9,7 @@
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/planner/table_filter_set.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
-#include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
-#include "duckdb/planner/filter/in_filter.hpp"
 
 using namespace duckdb;
 
@@ -23,9 +21,13 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	}
 
 	auto query = input.inputs[1].GetValue<string>();
+	auto disable_ssl = input.named_parameters.find("disable_ssl") != input.named_parameters.end() &&
+	                   input.named_parameters["disable_ssl"].GetValue<bool>();
+
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->uri = input.inputs[0].GetValue<string>();
-	bind_data->initial_client = RpcClient::GetClient(bind_data->uri);
+	bind_data->server_uri = make_uniq<RpcUri>(input.inputs[0].GetValue<string>(), !disable_ssl);
+
+	bind_data->initial_client = RpcClient::GetClient(*bind_data->server_uri);
 
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(context);
@@ -80,7 +82,8 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->uri = rpc_catalog.GetServerString();
+	bind_data->server_uri =
+	    make_uniq<RpcUri>(rpc_catalog.GetServerUri().Uri(), rpc_catalog.GetServerUri().Ssl()); // FIXME
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
 
 	auto bind_response = rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(
@@ -206,7 +209,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	// We execute the query here, right before scanning, so the result is fresh.
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
-		auto client = RpcClient::GetClient(bind_data.uri);
+		auto client = RpcClient::GetClient(*bind_data.server_uri);
 		client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 	}
 
@@ -225,7 +228,7 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 	if (bind_data.initial_client) { // TODO possible race here?
 		local_state->client = unique_ptr<RpcClient>(bind_data.initial_client.release());
 	} else {
-		local_state->client = RpcClient::GetClient(bind_data.uri);
+		local_state->client = RpcClient::GetClient(*bind_data.server_uri);
 	}
 
 	return local_state;
@@ -270,6 +273,7 @@ static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const F
 TableFunction RpcScanFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                         RpcInitLocal);
+	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.filter_pushdown = true;
