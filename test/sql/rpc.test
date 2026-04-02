@@ -9,7 +9,7 @@ require json
 statement ok
 call rpc_generate_keys();
 
-foreach server  '{TEST_DIR}/duckdb-rpc-socket' 'https://localhost:8080' 'http://localhost:8081'
+foreach server 'quack:localhost'
 
 statement ok con1
 call rpc_start({server});

@@ -6,6 +6,7 @@
 #include "rpc_scan_function.hpp"
 #include "rpc_start_function.hpp"
 #include "rpc_storage_extension.hpp"
+#include "rpc_uri.hpp"
 
 #include "duckdb/storage/storage_extension.hpp"
 
@@ -53,14 +54,28 @@ static void RpcAuthToken(const DataChunk &args, ExpressionState &state, Vector &
 	result.SetValue(0, Value(auth_str == default_token));
 }
 
-// pass session id
 static void RpcDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
 	D_ASSERT(args.size() == 2);
-	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
-	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
+	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR); // session id
+	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR); // query
 	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
 
 	result.SetValue(0, Value(true)); // choose life
+}
+
+static void RpcUriParser(const DataChunk &args, ExpressionState &, Vector &result) {
+	D_ASSERT(args.size() == 2);
+	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
+	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::BOOLEAN);
+	D_ASSERT(result.GetType().id() == LogicalTypeId::STRUCT);
+
+	RpcUri parsed(args.GetValue(0, 0).GetValue<string>(), args.GetValue(1, 0).GetValue<bool>());
+
+	result.SetValue(0, Value::STRUCT({{"host", Value(parsed.Host())},
+	                                  {"port", Value::USMALLINT(parsed.Port())},
+	                                  {"ipv6", Value::BOOLEAN(parsed.IPv6())},
+	                                  {"ssl", Value::BOOLEAN(parsed.Ssl())},
+	                                  {"url", Value(parsed.Http())}}));
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
@@ -83,6 +98,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
 	                                 LogicalType::BOOLEAN, RpcDummyAuthorization);
 	loader.RegisterFunction(rpc_authorization);
+
+	ScalarFunction rpc_uri_parser("rpc_uri_parser", {/* uri */ LogicalType::VARCHAR, /* ssl */ LogicalType::BOOLEAN},
+	                              LogicalType::STRUCT({{"host", LogicalType::VARCHAR},
+	                                                   {"port", LogicalType::USMALLINT},
+	                                                   {"ipv6", LogicalType::BOOLEAN},
+	                                                   {"ssl", LogicalType::BOOLEAN},
+	                                                   {"url", LogicalType::VARCHAR}}),
+	                              RpcUriParser);
+	loader.RegisterFunction(rpc_uri_parser);
 
 	// (ab)use storage extension info to store our state
 	auto ext = duckdb::make_shared_ptr<RpcStorageExtension>();

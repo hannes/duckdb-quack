@@ -1,5 +1,7 @@
 #include "rpc_server.hpp"
 #include "message.hpp"
+#include "rpc_uri.hpp"
+
 #include "ssl_key_generator.hpp"
 
 #include "duckdb/common/serializer/memory_stream.hpp"
@@ -26,12 +28,11 @@ void HttpsRpcServer::ListenThread(HttpsRpcServer *rpc_server, const string &list
 	rpc_server->server->listen(listen_host, listen_port);
 }
 
-void HttpsRpcServer::Listen(const string &listen_string_p) {
-	if (listen_string_p.empty()) {
-		throw InvalidInputException("Empty listen string specified");
-	}
+void HttpsRpcServer::Listen(const string &listen_uri) {
+	RpcUri parsed_uri(listen_uri);
+
 	// we construct this client solely to parse the host/port url
-	duckdb_httplib_openssl::Client dummy_client(listen_string_p);
+	duckdb_httplib_openssl::Client dummy_client(parsed_uri.Http());
 	bool use_https = dummy_client.ssl_context() != nullptr;
 
 	if (use_https) {
@@ -57,7 +58,7 @@ void HttpsRpcServer::Listen(const string &listen_string_p) {
 	};
 
 	server->Get("/", [=](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res) {
-		res.set_content("This is a DuckDB RPC Endpoint. Use ATTACH to connect here.\n", "text/plain");
+		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'quack:...' to connect here.\n", "text/plain");
 	});
 	server->Post("/rpc", [&](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res,
 	                         const duckdb_httplib_openssl::ContentReader &content_reader) {
@@ -71,7 +72,7 @@ void HttpsRpcServer::Listen(const string &listen_string_p) {
 	});
 
 	if (!server->is_valid()) {
-		throw InternalException("Failed to instantiate HTTP(S) server at %s", listen_string_p);
+		throw IOException("Failed to instantiate Quack RPC server at %s / %s", listen_uri, parsed_uri.Http());
 	}
 
 	listen_threads.push_back(std::thread(ListenThread, this, dummy_client.host(), dummy_client.port()));

@@ -1,6 +1,9 @@
 #pragma once
 
 #include "message.hpp"
+#include "rpc_uri.hpp"
+
+// TODO can we avoid this include here?
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.hpp"
 
@@ -27,7 +30,7 @@ public:
 protected:
 	mutex request_mutex;
 	MemoryStream read_stream, write_stream;
-	const string uri;
+	RpcUri uri;
 
 private:
 	unique_ptr<ProtocolMessage> WaitForMessageInternal(MessageType expected_type);
@@ -35,19 +38,6 @@ private:
 	virtual unique_ptr<ProtocolMessage> Receive() {
 		return nullptr;
 	};
-};
-
-class UnixSocketRpcClient : public RpcClient {
-public:
-	UnixSocketRpcClient(const string &uri_p);
-	~UnixSocketRpcClient() override;
-
-private:
-	void Send(unique_ptr<ProtocolMessage> message_p) override;
-	unique_ptr<ProtocolMessage> Receive() override;
-
-private:
-	int unix_socket_fd;
 };
 
 class HttpsRpcClient : public RpcClient {

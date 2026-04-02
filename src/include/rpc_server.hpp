@@ -60,23 +60,6 @@ protected:
 	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
 };
 
-class UnixSocketRpcServer : public RpcServer {
-public:
-	UnixSocketRpcServer(ClientContext &context_p) : RpcServer(context_p) {
-	}
-
-	void Listen(const string &listen_string) override;
-
-	~UnixSocketRpcServer() override;
-
-private:
-	static void UnixSocketListenThread(UnixSocketRpcServer *rpc_server);
-
-	int unix_socket_server_fd;
-	sockaddr_un unix_socket_address;
-	bool unix_socket_keep_listening;
-};
-
 class HttpsRpcServer : public RpcServer {
 public:
 	HttpsRpcServer(ClientContext &context_p) : RpcServer(context_p) {

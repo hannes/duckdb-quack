@@ -17,7 +17,7 @@ create table moo.fuu2 as values(44, 45);
 # statement ok
 # call rpc_generate_keys();
 
-foreach server  '{TEST_DIR}/duckdb-rpc-socket'
+foreach server 'quack:localhost'
 # 'wss://localhost:1294'
 
 statement ok con1

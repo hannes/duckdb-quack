@@ -15,8 +15,6 @@
 
 using namespace duckdb;
 
-// 1294 default port? seems to be unused
-
 RpcServer::RpcServer(ClientContext &context_p) : db(context_p.db) {
 }
 
@@ -44,7 +42,6 @@ string RpcServer::CreateNewConnection(const string &session_id) {
 
 	auto &client_config = ClientConfig::GetConfig(*new_connection->duckdb_connection->context);
 	client_config.enable_profiler = true;
-	// client_config.enable_detailed_profiling = true;
 	client_config.profiling_coverage = ProfilingCoverage::SELECT;
 	client_config.emit_profiler_output = false;
 	client_config.profiler_settings = {
@@ -63,8 +60,8 @@ static optional_idx GetEstimatedCardinality(ClientContext &context) {
 		if (profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO)) {
 			auto extra_info_map =
 			    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
-			if (extra_info_map.find(RenderTreeNode::ESTIMATED_CARDINALITY) != extra_info_map.end()) {
-				estimated_cardinality = atoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY].c_str());
+			if (extra_info_map.contains(RenderTreeNode::ESTIMATED_CARDINALITY)) {
+				estimated_cardinality = stoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY]);
 			}
 		}
 	}

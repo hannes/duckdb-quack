@@ -20,11 +20,14 @@ RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, c
 		return *it->second;
 	}
 	unique_ptr<RpcServer> server;
-	if (StringUtil::StartsWith(listen_string, "https://") || StringUtil::StartsWith(listen_string, "http://")) {
-		server = make_uniq<HttpsRpcServer>(context);
-	} else {
-		server = make_uniq<UnixSocketRpcServer>(context);
+	if (!StringUtil::StartsWith(listen_string, "quack:")) {
+		throw InvalidInputException("Invalid listen string, needs to start with quack:");
 	}
+	//	if (StringUtil::StartsWith(listen_string, "https://") || StringUtil::StartsWith(listen_string, "http://")) {
+	server = make_uniq<HttpsRpcServer>(context);
+	// } else {
+	// 	server = make_uniq<UnixSocketRpcServer>(context);
+	// }
 	server->Listen(listen_string);
 	servers.emplace(listen_string, std::move(server));
 	return *servers[listen_string];
