@@ -15,7 +15,7 @@
 using namespace duckdb;
 
 std::string SslKeyGenerator::GetDefaultCertificateDirectory(FileSystem &fs) {
-	auto certificate_directory = fs.JoinPath(fs.GetHomeDirectory(), ".duckdb", "extension_data", "rpc");
+	auto certificate_directory = fs.JoinPath(fs.GetHomeDirectory(), ".duckdb", "extension_data", "remote");
 	if (!fs.DirectoryExists(certificate_directory)) {
 		fs.CreateDirectoriesRecursive(certificate_directory);
 	}

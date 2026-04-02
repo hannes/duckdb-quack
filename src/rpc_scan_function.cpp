@@ -25,9 +25,9 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	                   input.named_parameters["disable_ssl"].GetValue<bool>();
 
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->server_uri = make_uniq<RpcUri>(input.inputs[0].GetValue<string>(), !disable_ssl);
+	bind_data->server_uri = RpcUri(input.inputs[0].GetValue<string>(), !disable_ssl);
 
-	bind_data->initial_client = RpcClient::GetClient(*bind_data->server_uri);
+	bind_data->initial_client = RpcClient::GetClient(bind_data->server_uri);
 
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(context);
@@ -64,7 +64,7 @@ RpcCatalog &GetRpcCatalog(ClientContext &context, Value &catalog_name) {
 		throw BinderException("Failed to find attached database \"%s\"", db_name);
 	}
 	auto &catalog = db->GetCatalog();
-	if (catalog.GetCatalogType() != "rpc") {
+	if (catalog.GetCatalogType() != "remote") {
 		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
 	}
 	return catalog.Cast<RpcCatalog>();
@@ -82,8 +82,7 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->server_uri =
-	    make_uniq<RpcUri>(rpc_catalog.GetServerUri().Uri(), rpc_catalog.GetServerUri().Ssl()); // FIXME
+	bind_data->server_uri = rpc_catalog.GetServerUri();
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
 
 	auto bind_response = rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(
@@ -209,7 +208,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	// We execute the query here, right before scanning, so the result is fresh.
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
-		auto client = RpcClient::GetClient(*bind_data.server_uri);
+		auto client = RpcClient::GetClient(bind_data.server_uri);
 		client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 	}
 
@@ -228,7 +227,7 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 	if (bind_data.initial_client) { // TODO possible race here?
 		local_state->client = unique_ptr<RpcClient>(bind_data.initial_client.release());
 	} else {
-		local_state->client = RpcClient::GetClient(*bind_data.server_uri);
+		local_state->client = RpcClient::GetClient(bind_data.server_uri);
 	}
 
 	return local_state;

@@ -104,12 +104,12 @@ private:
 
 class RpcCatalog : public Catalog {
 public:
-	explicit RpcCatalog(AttachedDatabase &db_p, unique_ptr<RpcUri> server_uri_p);
+	explicit RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p);
 	~RpcCatalog();
 
 public:
 	string GetCatalogType() override {
-		return "rpc";
+		return "remote";
 	}
 	void Initialize(bool load_builtin) override;
 
@@ -144,7 +144,7 @@ public:
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
-	unique_ptr<RpcUri> server_uri;
+	RpcUri server_uri;
 	unique_ptr<RpcClient> client;
 	string connection_id;
 	unordered_map<string, unique_ptr<RpcSchemaCatalogEntry>> schemas;

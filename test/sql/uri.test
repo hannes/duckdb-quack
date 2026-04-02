@@ -5,47 +5,47 @@
 require rpc
 
 query IIIII
-select unnest(rpc_uri_parser('quack:localhost', true));
+select unnest(rpc_uri_parser('remote:localhost', true));
 ----
 localhost	1294	false	true	https://localhost:1294
 
 query IIIII
-select unnest(rpc_uri_parser('quack:localhost', false));
+select unnest(rpc_uri_parser('remote:localhost', false));
 ----
 localhost	1294	false	false	http://localhost:1294
 
 query IIIII
-select unnest(rpc_uri_parser('quack://localhost', true));
+select unnest(rpc_uri_parser('remote://localhost', true));
 ----
 localhost	1294	false	true	https://localhost:1294
 
 query IIIII
-select unnest(rpc_uri_parser('quack:localhost:1234', true));
+select unnest(rpc_uri_parser('remote:localhost:1234', true));
 ----
 localhost	1234	false	true	https://localhost:1234
 
 query IIIII
-select unnest(rpc_uri_parser('quack:otherhost', true));
+select unnest(rpc_uri_parser('remote:otherhost', true));
 ----
 otherhost	1294	false	true	https://otherhost:1294
 
 query IIIII
-select unnest(rpc_uri_parser('quack:127.0.0.1', true));
+select unnest(rpc_uri_parser('remote:127.0.0.1', true));
 ----
 127.0.0.1	1294	false	true	https://127.0.0.1:1294
 
 query IIIII
-select unnest(rpc_uri_parser('quack:127.0.0.1:1234', true));
+select unnest(rpc_uri_parser('remote:127.0.0.1:1234', true));
 ----
 127.0.0.1	1234	false	true	https://127.0.0.1:1234
 
 query IIIII
-select unnest(rpc_uri_parser('quack:[::1]', true));
+select unnest(rpc_uri_parser('remote:[::1]', true));
 ----
 ::1	1294	true	true	https://[::1]:1294
 
 query IIIII
-select unnest(rpc_uri_parser('quack:[::1]:1234', true));
+select unnest(rpc_uri_parser('remote:[::1]:1234', true));
 ----
 ::1	1234	true	true	https://[::1]:1234
 
@@ -55,39 +55,39 @@ select unnest(rpc_uri_parser('quack:[::1]:1234', true));
 statement error
 select unnest(rpc_uri_parser('', true));
 ----
-Invalid DuckDB Quack RPC URI
+Invalid DuckDB remote URI
 
 
 statement error
 select unnest(rpc_uri_parser('asdf', true));
 ----
-Invalid DuckDB Quack RPC URI
+Invalid DuckDB remote URI
 
 statement error
-select unnest(rpc_uri_parser('quack:', true));
+select unnest(rpc_uri_parser('remote:', true));
 ----
 Missing hostname
 
 
 statement error
-select unnest(rpc_uri_parser('quack::', true));
+select unnest(rpc_uri_parser('remote::', true));
 ----
 Invalid Port
 
 
 statement error
-select unnest(rpc_uri_parser('quack:localhost:', true));
+select unnest(rpc_uri_parser('remote:localhost:', true));
 ----
 Invalid Port
 
 
 statement error
-select unnest(rpc_uri_parser('quack:localhost:asdf', true));
+select unnest(rpc_uri_parser('remote:localhost:asdf', true));
 ----
 Invalid Port
 
 
 statement error
-select unnest(rpc_uri_parser('quack:[::1', true));
+select unnest(rpc_uri_parser('remote:[::1', true));
 ----
 Invalid IPv6 URL

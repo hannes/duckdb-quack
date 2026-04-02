@@ -1,25 +1,29 @@
 #pragma once
 #include "duckdb/common/string_util.hpp"
 
-// 1294 default port? seems to be unused
-
 namespace duckdb {
 
 class RpcUri {
 public:
+	RpcUri() : RpcUri("remote:localhost") {
+	} // orrr
+
 	RpcUri(string uri_p, bool ssl_p = true) : ssl(ssl_p), uri(uri_p) {
 		// we should really instantiate a parser here instead, but alas
 		// whitespace be gone
+		ipv6 = false;
+		port = 1294;
+
 		StringUtil::Trim(uri);
 		// first off, lets be tolerant and accept this variant, too
-		if (StringUtil::StartsWith(uri, "quack://")) {
-			uri = StringUtil::Replace(uri, "quack://", "quack:");
+		if (StringUtil::StartsWith(uri, "remote://")) {
+			uri = StringUtil::Replace(uri, "remote://", "remote:");
 		}
-		if (!StringUtil::StartsWith(uri, "quack:")) {
-			throw InvalidInputException("Invalid DuckDB Quack RPC URI, needs to start with 'quack:'");
+		if (!StringUtil::StartsWith(uri, "remote:")) {
+			throw InvalidInputException("Invalid DuckDB remote URI, needs to start with 'remote:'");
 		}
 
-		auto remainder = StringUtil::Replace(uri, "quack:", "");
+		auto remainder = StringUtil::Replace(uri, "remote:", "");
 		if (remainder.empty()) {
 			throw InvalidInputException("Missing hostname");
 		}
@@ -36,6 +40,7 @@ public:
 			}
 			remainder = remainder.substr(pos + 1);
 		}
+
 		// a port was specified
 		if (StringUtil::Contains(remainder, ':')) {
 			auto pos = remainder.find(':');
@@ -81,10 +86,10 @@ public:
 	}
 
 private:
-	bool ssl = true;
-	bool ipv6 = false;
-	string host = "localhost";
-	uint16_t port = 1294; // default port!
+	bool ssl;
+	bool ipv6;
+	string host;
+	uint16_t port; // default port!
 	string http;
 	string uri;
 };

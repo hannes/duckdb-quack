@@ -71,8 +71,8 @@ void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 	throw NotImplementedException("Checkpoint not implemented yet");
 }
 
-RpcCatalog::RpcCatalog(AttachedDatabase &db_p, unique_ptr<RpcUri> server_uri_p)
-    : Catalog(db_p), server_uri(std::move(server_uri_p)), client(RpcClient::GetClient(*server_uri)) {
+RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p)
+    : Catalog(db_p), server_uri(server_uri_p), client(RpcClient::GetClient(server_uri)) {
 	// evil copy paste
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(db_p.GetDatabase());
@@ -120,7 +120,7 @@ optional_ptr<SchemaCatalogEntry> RpcCatalog::LookupSchema(CatalogTransaction tra
 }
 
 const RpcUri &RpcCatalog::GetServerUri() {
-	return *server_uri;
+	return server_uri;
 }
 
 unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query) {
@@ -178,8 +178,7 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
 	auto bind_data = make_uniq<RpcBindData>();
-	bind_data->server_uri =
-	    make_uniq<RpcUri>(rpc_catalog.GetServerUri().Uri(), rpc_catalog.GetServerUri().Ssl()); // FIME uuugly
+	bind_data->server_uri = rpc_catalog.GetServerUri();
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
 	bind_data->table_name = name;
 	for (auto &col : GetColumns().Physical()) {

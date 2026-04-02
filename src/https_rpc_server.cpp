@@ -52,7 +52,8 @@ void HttpsRpcServer::Listen(const RpcUri &uri) {
 	};
 
 	server->Get("/", [=](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res) {
-		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'quack:...' to connect here.\n", "text/plain");
+		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'remote:...' to connect here.\n",
+		                "text/plain");
 	});
 	server->Post("/rpc", [&](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res,
 	                         const duckdb_httplib_openssl::ContentReader &content_reader) {

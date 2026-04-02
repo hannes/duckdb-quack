@@ -4,7 +4,7 @@
 
 require rpc
 
-foreach server 'quack:localhost'
+foreach server 'remote:localhost'
 
 statement ok con1
 create table t1 as select range i from range(100);

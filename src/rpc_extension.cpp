@@ -2,7 +2,7 @@
 
 #include "duckdb.hpp"
 
-#include "rpc_extension.hpp"
+#include "remote_extension.hpp"
 #include "rpc_scan_function.hpp"
 #include "rpc_start_function.hpp"
 #include "rpc_storage_extension.hpp"
@@ -19,9 +19,7 @@ static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_
                                      AttachOptions &attach_options) {
 	auto diable_ssl = attach_options.options.find("disable_ssl") != attach_options.options.end() &&
 	                  attach_options.options["disable_ssl"].GetValue<bool>();
-	auto uri = make_uniq<RpcUri>("quack:" + info.path, !diable_ssl);
-
-	return make_uniq<RpcCatalog>(db, std::move(uri));
+	return make_uniq<RpcCatalog>(db, RpcUri("remote:" + info.path, !diable_ssl));
 }
 
 static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
@@ -129,14 +127,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          nullptr, SetScope::GLOBAL);
 }
 
-void RpcExtension::Load(ExtensionLoader &loader) {
+void RemoteExtension::Load(ExtensionLoader &loader) {
 	LoadInternal(loader);
 }
-std::string RpcExtension::Name() {
-	return "rpc";
+std::string RemoteExtension::Name() {
+	return "remote";
 }
 
-std::string RpcExtension::Version() const {
+std::string RemoteExtension::Version() const {
 #ifdef EXT_VERSION_RPC
 	return EXT_VERSION_RPC;
 #else
@@ -148,7 +146,7 @@ std::string RpcExtension::Version() const {
 
 extern "C" {
 
-DUCKDB_CPP_EXTENSION_ENTRY(rpc, loader) {
+DUCKDB_CPP_EXTENSION_ENTRY(remote, loader) {
 	LoadInternal(loader);
 }
 }

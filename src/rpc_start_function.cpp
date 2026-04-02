@@ -1,8 +1,6 @@
 #include "rpc_start_function.hpp"
 #include "rpc_storage_extension.hpp"
 #include "ssl_key_generator.hpp"
-
-#include "duckdb/function/scalar_function.hpp"
 #include "duckdb/main/database.hpp"
 
 #include <unistd.h>
@@ -16,7 +14,7 @@ struct RpcStartStopFunctionData : public TableFunctionData {
 
 	bool finished = false;
 	bool auth_is_default = false;
-	unique_ptr<RpcUri> listen_uri;
+	RpcUri listen_uri;
 };
 
 static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFunctionBindInput &input,
@@ -28,7 +26,7 @@ static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFuncti
 	}
 	auto disable_ssl = input.named_parameters.find("disable_ssl") != input.named_parameters.end() &&
 	                   input.named_parameters["disable_ssl"].GetValue<bool>();
-	bind_data->listen_uri = make_uniq<RpcUri>(uri_value.GetValue<string>(), !disable_ssl);
+	bind_data->listen_uri = RpcUri(uri_value.GetValue<string>(), !disable_ssl);
 
 	return_types.emplace_back(LogicalType::VARCHAR);
 	return_types.emplace_back(LogicalType::VARCHAR);
@@ -55,9 +53,9 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 		return;
 	}
 
-	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, *bind_data.listen_uri);
-	output.SetValue(0, 0, bind_data.listen_uri->Uri());
-	output.SetValue(1, 0, bind_data.listen_uri->Http());
+	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_uri);
+	output.SetValue(0, 0, bind_data.listen_uri.Uri());
+	output.SetValue(1, 0, bind_data.listen_uri.Http());
 
 	// generate default token if not set
 	if (bind_data.auth_is_default) {
@@ -98,7 +96,7 @@ static unique_ptr<FunctionData> RpcStopBind(ClientContext &context, TableFunctio
 		throw InvalidInputException("Invalid listen string specified");
 	}
 	bind_data->listen_uri =
-	    make_uniq<RpcUri>(uri_value.GetValue<string>(), /* not really but we don't want to ask the user again */ true);
+	    RpcUri(uri_value.GetValue<string>(), /* not really but we don't want to ask the user again */ true);
 	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("status");
 
@@ -111,10 +109,10 @@ static void RpcStopFun(ClientContext &context, TableFunctionInput &data_p, DataC
 		return;
 	}
 	auto &rpc_state = RpcStorageExtensionInfo::GetState(*context.db);
-	if (rpc_state.StopServer(context, *bind_data.listen_uri)) {
-		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_uri->Uri()));
+	if (rpc_state.StopServer(context, bind_data.listen_uri)) {
+		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_uri.Uri()));
 	} else {
-		output.data[0].SetValue(0, StringUtil::Format("No server found listening on %s", bind_data.listen_uri->Uri()));
+		output.data[0].SetValue(0, StringUtil::Format("No server found listening on %s", bind_data.listen_uri.Uri()));
 	}
 	output.SetCardinality(1);
 	bind_data.finished = true;

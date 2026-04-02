@@ -2,7 +2,7 @@
 # description: test rpc extension
 # group: [sql]
 
-require rpc
+require remote
 
 
 statement ok
@@ -17,7 +17,7 @@ create table moo.fuu2 as values(44, 45);
 statement ok
 call rpc_generate_keys();
 
-foreach server 'quack:localhost'
+foreach server 'remote:localhost'
 
 foreach ssl false true
 
@@ -31,7 +31,7 @@ from rpc_call({server}, 'select 42, 43', disable_ssl={ssl})
 42	43
 
 statement ok con2
-attach {server} as rpc (TYPE rpc, disable_ssl {ssl})
+attach {server} as rpc (disable_ssl {ssl})
 
 query II
 from rpc.fuu;
@@ -134,7 +134,7 @@ statement ok con1
 call rpc_stop({server});
 
 statement error con2
-attach {server} as rpc (TYPE rpc, disable_ssl {ssl})
+attach {server} as rpc (disable_ssl {ssl})
 ----
 Failed to send message
 

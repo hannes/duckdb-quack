@@ -4,7 +4,7 @@
 
 namespace duckdb {
 
-class RpcExtension : public Extension {
+class RemoteExtension : public Extension {
 public:
 	void Load(ExtensionLoader &db) override;
 	std::string Name() override;
