@@ -6,6 +6,12 @@
 #include "rpc_bind_data.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
+#include "duckdb/planner/table_filter.hpp"
+#include "duckdb/planner/table_filter_set.hpp"
+#include "duckdb/planner/filter/constant_filter.hpp"
+#include "duckdb/planner/filter/null_filter.hpp"
+#include "duckdb/planner/filter/conjunction_filter.hpp"
+#include "duckdb/planner/filter/in_filter.hpp"
 
 using namespace duckdb;
 
@@ -106,6 +112,92 @@ struct RpcGlobalState : GlobalTableFunctionState {
 	atomic<bool> done;
 };
 
+static bool CanPushdownFilter(const TableFilter &filter) {
+	switch (filter.filter_type) {
+	case TableFilterType::CONSTANT_COMPARISON:
+	case TableFilterType::IS_NULL:
+	case TableFilterType::IS_NOT_NULL:
+	case TableFilterType::IN_FILTER:
+		return true;
+	case TableFilterType::CONJUNCTION_AND: {
+		auto &conjunction = filter.Cast<ConjunctionAndFilter>();
+		for (auto &child : conjunction.child_filters) {
+			if (!CanPushdownFilter(*child)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	case TableFilterType::CONJUNCTION_OR: {
+		auto &conjunction = filter.Cast<ConjunctionOrFilter>();
+		for (auto &child : conjunction.child_filters) {
+			if (!CanPushdownFilter(*child)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	default:
+		return false;
+	}
+}
+
+static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFunctionInitInput &input) {
+	string query;
+
+	// Projection: select only the columns DuckDB actually needs in the output.
+	// With filter_prune, projection_ids indexes into column_ids for output columns only.
+	// Filter-only columns are in column_ids but NOT in projection_ids — they go in WHERE, not SELECT.
+	if (!input.column_ids.empty() && !bind_data.column_names.empty()) {
+		vector<string> selected_columns;
+		if (!input.projection_ids.empty()) {
+			for (auto &proj_id : input.projection_ids) {
+				auto col_id = input.column_ids[proj_id];
+				if (IsRowIdColumnId(col_id) || col_id >= bind_data.column_names.size()) {
+					continue;
+				}
+				selected_columns.push_back(KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_id]));
+			}
+		} else {
+			for (auto &col_id : input.column_ids) {
+				if (IsRowIdColumnId(col_id) || col_id >= bind_data.column_names.size()) {
+					continue;
+				}
+				selected_columns.push_back(KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_id]));
+			}
+		}
+		if (!selected_columns.empty()) {
+			query = "SELECT " + StringUtil::Join(selected_columns, ", ");
+		}
+	}
+	if (query.empty()) {
+		query = "SELECT *";
+	}
+	query += StringUtil::Format(" FROM %s", bind_data.table_name);
+
+	// Filters: build WHERE clause from pushable filters
+	if (input.filters) {
+		vector<string> where_clauses;
+		for (auto &entry : *input.filters) {
+			auto col_idx = entry.GetIndex().GetIndex();
+			if (col_idx >= bind_data.column_names.size()) {
+				continue;
+			}
+			auto &filter = entry.Filter();
+			if (!CanPushdownFilter(filter)) {
+				continue;
+			}
+			auto col_name = KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_idx]);
+			where_clauses.push_back(filter.ToString(col_name));
+		}
+		if (!where_clauses.empty()) {
+			query += " WHERE " + StringUtil::Join(where_clauses, " AND ");
+		}
+	}
+
+	return query;
+}
+
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->Cast<RpcBindData>();
 
@@ -113,9 +205,10 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	// to avoid the server-side result being overwritten by subsequent lookups.
 	// We execute the query here, right before scanning, so the result is fresh.
 	if (!bind_data.table_name.empty()) {
+		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = RpcClient::GetClient(bind_data.uri);
-		client->MakeRequest<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
-		    bind_data.connection_id, StringUtil::Format("FROM %s", bind_data.table_name), true));
+		client->MakeRequest<PrepareResponseMessage>(
+		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 	}
 
 	return make_uniq<RpcGlobalState>(GlobalTableFunctionState::MAX_THREADS);
@@ -154,8 +247,17 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 		return;
 	}
 
-	output.Reference(*fetch_response->ResponseData());
-	output.SetCardinality(fetch_response->ResponseData()->size());
+	auto &response_chunk = *fetch_response->ResponseData();
+	if (response_chunk.ColumnCount() == output.ColumnCount()) {
+		output.Reference(response_chunk);
+	} else {
+		// Server returned more columns than needed (e.g. rpc_call with projection pushdown).
+		// Copy only the columns DuckDB expects.
+		for (idx_t i = 0; i < output.ColumnCount(); i++) {
+			output.data[i].Reference(response_chunk.data[i]);
+		}
+	}
+	output.SetCardinality(response_chunk.size());
 }
 
 static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
@@ -170,6 +272,9 @@ TableFunction RpcScanFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                         RpcInitLocal);
 	fun.cardinality = RpcCardinality;
+	fun.projection_pushdown = true;
+	fun.filter_pushdown = true;
+	fun.filter_prune = true;
 	return fun;
 }
 
@@ -177,5 +282,8 @@ TableFunction RpcScanByNameFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan,
 	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
 	fun.cardinality = RpcCardinality;
+	fun.projection_pushdown = true;
+	fun.filter_pushdown = true;
+	fun.filter_prune = true;
 	return fun;
 }

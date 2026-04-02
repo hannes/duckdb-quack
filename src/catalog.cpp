@@ -181,6 +181,10 @@ TableFunction RpcTableCatalogEntry::GetScanFunction(ClientContext &context, uniq
 	bind_data->uri = rpc_catalog.GetServerString();
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
 	bind_data->table_name = name;
+	for (auto &col : GetColumns().Physical()) {
+		bind_data->column_names.push_back(col.Name());
+		bind_data->column_types.push_back(col.Type());
+	}
 	bind_data_p = std::move(bind_data);
 	return RpcScanFunction::GetFunction();
 }
