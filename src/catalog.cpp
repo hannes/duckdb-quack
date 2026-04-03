@@ -71,8 +71,10 @@ void RpcTransactionManager::Checkpoint(ClientContext &context, bool force) {
 	throw NotImplementedException("Checkpoint not implemented yet");
 }
 
-RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p)
+RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, ClientContext &context)
     : Catalog(db_p), server_uri(server_uri_p), client(RpcClient::GetClient(server_uri)) {
+	client->SetContext(&context);
+
 	// evil copy paste
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(db_p.GetDatabase());

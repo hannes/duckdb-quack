@@ -104,7 +104,7 @@ private:
 
 class RpcCatalog : public Catalog {
 public:
-	explicit RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p);
+	explicit RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, ClientContext &context);
 	~RpcCatalog();
 
 public:
