@@ -1,0 +1,134 @@
+# name: test/sql/logging.test
+# description: test RPC and HTTP logging
+# group: [sql]
+
+require remote
+
+# start server
+statement ok
+call rpc_generate_keys();
+
+statement ok con1
+call rpc_start('remote:localhost', disable_ssl=false);
+
+sleep 100 millisecond
+
+# --- RPC logging ---
+
+statement ok con2
+CALL enable_logging('RPC');
+
+# rpc_call should produce RPC log entries
+query I con2
+from rpc_call('remote:localhost', 'select 42 as answer', disable_ssl=false)
+----
+42
+
+# check that we have RPC logs with correct structure
+query I con2
+select count(*) > 0 from duckdb_logs where type = 'RPC'
+----
+true
+
+# check that PREPARE_REQUEST has the query
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where message_type = 'PREPARE_REQUEST' and query = 'select 42 as answer'
+----
+true
+
+# check that FETCH_REQUEST entries exist
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where message_type = 'FETCH_REQUEST'
+----
+true
+
+# check that rpc_connection_id is set on non-connection messages
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where message_type = 'PREPARE_REQUEST' and rpc_connection_id != ''
+----
+true
+
+# check duration_ms is non-negative
+query I con2
+select count(*) = 0 from duckdb_logs_parsed('RPC') where duration_ms < 0
+----
+true
+
+# check server field is populated on client-side logs
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where server is not null and server != ''
+----
+true
+
+# check response_type is populated
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where response_type = 'PREPARE_RESPONSE'
+----
+true
+
+# check error field for successful queries is NULL
+query I con2
+select count(*) = 0 from duckdb_logs_parsed('RPC') where error is not null and server is not null
+----
+true
+
+# check server-side logs exist (scope=DATABASE, no server field)
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where server is null or server = ''
+----
+true
+
+# clear logs and test error logging
+statement ok con2
+CALL truncate_duckdb_logs();
+
+statement error con2
+from rpc_call('remote:localhost', 'selexxxct 42', disable_ssl=false)
+----
+Error
+
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('RPC') where response_type = 'ERROR' and error is not null
+----
+true
+
+# --- HTTP logging ---
+
+statement ok con2
+CALL truncate_duckdb_logs();
+
+statement ok con2
+CALL disable_logging();
+
+statement ok con2
+CALL enable_logging('HTTP');
+
+query I con2
+from rpc_call('remote:localhost', 'select 1', disable_ssl=false)
+----
+1
+
+# check HTTP logs exist with POST method
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.type = 'POST'
+----
+true
+
+# check HTTP response status
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = '200'
+----
+true
+
+# check URL contains /rpc
+query I con2
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.url like '%/rpc'
+----
+true
+
+# clean up
+statement ok con2
+CALL disable_logging();
+
+statement ok con1
+call rpc_stop('remote:localhost');
