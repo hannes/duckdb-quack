@@ -31,8 +31,46 @@ HttpsRpcClient::~HttpsRpcClient() {
 unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolMessage> request_message) {
 	D_ASSERT(request_message);
 	request_message->ToMemoryStream(write_stream);
+
+	int64_t start_time = 0;
+	bool should_log_http = context && Logger::Get(*context).ShouldLog(HTTPLogType::NAME, HTTPLogType::LEVEL);
+	if (should_log_http) {
+		start_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
+		                 .time_since_epoch()
+		                 .count();
+	}
+
 	auto https_result = https_client->Post("/rpc", (const char *)write_stream.GetData(), write_stream.GetPosition(),
 	                                       "application/duckdb");
+
+	if (should_log_http) {
+		int64_t end_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
+		                       .time_since_epoch()
+		                       .count();
+		int64_t duration_ms = end_time - start_time;
+		int status = https_result ? https_result->status : -1;
+
+		child_list_t<Value> request_child_list = {
+		    {"type", Value("POST")},
+		    {"url", Value(uri.Http() + "/rpc")},
+		    {"start_time", Value()},
+		    {"duration_ms", Value::BIGINT(duration_ms)},
+		    {"headers", Value()},
+		};
+		auto request_value = Value::STRUCT(request_child_list);
+
+		child_list_t<Value> response_child_list = {
+		    {"status", Value(to_string(status))},
+		    {"reason", https_result ? Value(https_result->reason) : Value()},
+		    {"headers", Value()},
+		};
+		auto response_value = Value::STRUCT(response_child_list);
+
+		child_list_t<Value> child_list = {{"request", request_value}, {"response", response_value}};
+		auto msg = Value::STRUCT(child_list).ToString();
+		Logger::Get(*context).WriteLog(HTTPLogType::NAME, HTTPLogType::LEVEL, msg);
+	}
+
 	if (!https_result) {
 		throw IOException("Failed to send message %s ", to_string(https_result.error()));
 	}

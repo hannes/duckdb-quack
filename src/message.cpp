@@ -140,15 +140,19 @@ unique_ptr<ProtocolMessage> ConnectionResponseMessage::Deserialize(Deserializer 
 void PrepareRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
+	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 	serializer.WriteProperty<string>(200, "sql_query", sql_query);
 	serializer.WriteProperty<bool>(201, "immediately_execute", immediately_execute);
 }
 
 unique_ptr<ProtocolMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
+	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
 	auto immediately_execute = deserializer.ReadProperty<bool>(201, "immediately_execute");
-	return make_uniq<PrepareRequestMessage>(connection_id, sql_query, immediately_execute);
+	auto msg = make_uniq<PrepareRequestMessage>(connection_id, sql_query, immediately_execute);
+	msg->SetClientQueryId(cqid);
+	return msg;
 }
 
 void PrepareResponseMessage::Serialize(Serializer &serializer) const {
@@ -168,13 +172,15 @@ unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &de
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
-
-	// 240
+	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 }
 
 unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
-	return make_uniq<FetchRequestMessage>(connection_id);
+	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
+	auto msg = make_uniq<FetchRequestMessage>(connection_id);
+	msg->SetClientQueryId(cqid);
+	return msg;
 }
 
 void FetchResponseMessage::Serialize(Serializer &serializer) const {
@@ -213,6 +219,7 @@ void CatalogRequestMessage::Serialize(Serializer &serializer) const {
 	D_ASSERT(parse_info);
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
+	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 	// FIXME this is only required because serialization of parse info is borked
 	serializer.WriteProperty<ParseInfoType>(97, "info_type", parse_info->info_type);
 	parse_info->Serialize(serializer);
@@ -220,6 +227,7 @@ void CatalogRequestMessage::Serialize(Serializer &serializer) const {
 
 unique_ptr<ProtocolMessage> CatalogRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
+	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
 	unique_ptr<ParseInfo> parse_info;
 	switch (info_type) {
@@ -230,7 +238,9 @@ unique_ptr<ProtocolMessage> CatalogRequestMessage::Deserialize(Deserializer &des
 		parse_info = ParseInfo::Deserialize(deserializer);
 		break;
 	}
-	return make_uniq<CatalogRequestMessage>(connection_id, std::move(parse_info));
+	auto msg = make_uniq<CatalogRequestMessage>(connection_id, std::move(parse_info));
+	msg->SetClientQueryId(cqid);
+	return msg;
 }
 
 void CatalogResponseMessage::Serialize(Serializer &serializer) const {
@@ -259,6 +269,7 @@ void AppendRequestMessage::Serialize(Serializer &serializer) const {
 	D_ASSERT(append_chunk);
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
+	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 	serializer.WriteProperty<string>(270, "schema_name", schema_name);
 	serializer.WriteProperty<string>(271, "table_name", table_name);
 
@@ -268,6 +279,7 @@ void AppendRequestMessage::Serialize(Serializer &serializer) const {
 
 unique_ptr<ProtocolMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id_p = deserializer.ReadProperty<string>(98, "connection_id");
+	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 	auto schema_name_p = deserializer.ReadProperty<string>(270, "schema_name");
 	auto table_name_p = deserializer.ReadProperty<string>(271, "table_name");
 
@@ -275,7 +287,9 @@ unique_ptr<ProtocolMessage> AppendRequestMessage::Deserialize(Deserializer &dese
 	deserializer.ReadObject(272, "append_chunk",
 	                        [&](Deserializer &inner_deserializer) { append_chunk_p->Deserialize(inner_deserializer); });
 
-	return make_uniq<AppendRequestMessage>(connection_id_p, schema_name_p, table_name_p, std::move(append_chunk_p));
+	auto msg = make_uniq<AppendRequestMessage>(connection_id_p, schema_name_p, table_name_p, std::move(append_chunk_p));
+	msg->SetClientQueryId(cqid);
+	return msg;
 }
 
 void AppendResponseMessage::Serialize(Serializer &serializer) const {

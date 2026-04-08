@@ -3,11 +3,13 @@
 #include "duckdb.hpp"
 
 #include "remote_extension.hpp"
+#include "rpc_log_type.hpp"
 #include "rpc_scan_function.hpp"
 #include "rpc_start_function.hpp"
 #include "rpc_storage_extension.hpp"
 #include "rpc_uri.hpp"
 
+#include "duckdb/logging/log_manager.hpp"
 #include "duckdb/storage/storage_extension.hpp"
 
 #include "catalog.hpp"
@@ -19,7 +21,7 @@ static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_
                                      AttachOptions &attach_options) {
 	auto diable_ssl = attach_options.options.find("disable_ssl") != attach_options.options.end() &&
 	                  attach_options.options["disable_ssl"].GetValue<bool>();
-	return make_uniq<RpcCatalog>(db, RpcUri("remote:" + info.path, !diable_ssl));
+	return make_uniq<RpcCatalog>(db, RpcUri("remote:" + info.path, !diable_ssl), context);
 }
 
 static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
@@ -109,6 +111,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                                                   {"url", LogicalType::VARCHAR}}),
 	                              RpcUriParser);
 	loader.RegisterFunction(rpc_uri_parser);
+
+	loader.GetDatabaseInstance().GetLogManager().RegisterLogType(make_uniq<RPCLogType>());
 
 	// (ab)use storage extension info to store our state
 	auto ext = duckdb::make_shared_ptr<RpcStorageExtension>();

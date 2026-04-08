@@ -56,6 +56,14 @@ public:
 		return message_type;
 	}
 
+	optional_idx ClientQueryId() const {
+		return client_query_id;
+	}
+
+	void SetClientQueryId(optional_idx query_id) {
+		client_query_id = query_id;
+	}
+
 	virtual ~ProtocolMessage() {
 	}
 
@@ -63,6 +71,7 @@ protected:
 	explicit ProtocolMessage(MessageType type) : message_type(type) {
 	}
 	MessageType message_type = MessageType::INVALID;
+	optional_idx client_query_id;
 };
 
 class PrepareRequestMessage : public ProtocolMessage {
