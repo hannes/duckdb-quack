@@ -1,7 +1,9 @@
 #include "rpc_server.hpp"
 #include "message.hpp"
+#include "rpc_log_type.hpp"
 #include "rpc_storage_extension.hpp"
 
+#include "duckdb/logging/logger.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/common/render_tree.hpp"
@@ -110,8 +112,70 @@ string RpcServer::GenerateSessionId() {
 	return session_id;
 }
 
+// Extract connection_id from a message if available
+static string ExtractConnectionId(ProtocolMessage &msg) {
+	switch (msg.Type()) {
+	case MessageType::PREPARE_REQUEST:
+		return msg.Cast<PrepareRequestMessage>().ConnectionId();
+	case MessageType::FETCH_REQUEST:
+		return msg.Cast<FetchRequestMessage>().ConnectionId();
+	case MessageType::CATALOG_REQUEST:
+		return msg.Cast<CatalogRequestMessage>().ConnectionId();
+	case MessageType::APPEND_REQUEST:
+		return msg.Cast<AppendRequestMessage>().ConnectionId();
+	default:
+		return "";
+	}
+}
+
+static optional_idx ExtractClientQueryId(ProtocolMessage &msg) {
+	return msg.ClientQueryId();
+}
+
+static string ExtractQuery(ProtocolMessage &msg) {
+	if (msg.Type() == MessageType::PREPARE_REQUEST) {
+		return msg.Cast<PrepareRequestMessage>().Query();
+	}
+	return "";
+}
+
 // main switcheroo happens here
 unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_message) {
+	auto &logger = Logger::Get(*db);
+	bool should_log = logger.ShouldLog(RPCLogType::NAME, RPCLogType::LEVEL);
+
+	string rpc_connection_id;
+	string query;
+	optional_idx client_query_id;
+	int64_t start_time = 0;
+	if (should_log) {
+		rpc_connection_id = ExtractConnectionId(received_message);
+		client_query_id = ExtractClientQueryId(received_message);
+		query = ExtractQuery(received_message);
+		start_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
+		                 .time_since_epoch()
+		                 .count();
+	}
+
+	auto response = HandleMessageInternal(received_message);
+
+	if (should_log) {
+		int64_t end_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
+		                       .time_since_epoch()
+		                       .count();
+		string error;
+		if (response->Type() == MessageType::ERROR) {
+			error = response->Cast<ErrorMessage>().Error();
+		}
+		auto msg = RPCLogType::ConstructLogMessage(received_message.Type(), rpc_connection_id, client_query_id, query,
+		                                           "", end_time - start_time, response->Type(), error);
+		logger.WriteLog(RPCLogType::NAME, RPCLogType::LEVEL, msg);
+	}
+
+	return response;
+}
+
+unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();

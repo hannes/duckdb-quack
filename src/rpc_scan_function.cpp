@@ -28,6 +28,7 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	bind_data->server_uri = RpcUri(input.inputs[0].GetValue<string>(), !disable_ssl);
 
 	bind_data->initial_client = RpcClient::GetClient(bind_data->server_uri);
+	bind_data->initial_client->SetContext(&context);
 
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(context);
@@ -209,6 +210,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = RpcClient::GetClient(bind_data.server_uri);
+		client->SetContext(&context);
 		client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 	}
 
@@ -228,6 +230,7 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 		local_state->client = unique_ptr<RpcClient>(bind_data.initial_client.release());
 	} else {
 		local_state->client = RpcClient::GetClient(bind_data.server_uri);
+		local_state->client->SetContext(&context.client);
 	}
 
 	return local_state;

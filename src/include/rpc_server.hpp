@@ -52,6 +52,7 @@ public:
 
 protected:
 	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
+	unique_ptr<ProtocolMessage> HandleMessageInternal(ProtocolMessage &received_message);
 
 protected:
 	std::vector<std::thread> listen_threads;
