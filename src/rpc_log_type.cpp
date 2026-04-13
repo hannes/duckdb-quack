@@ -9,14 +9,10 @@ RPCLogType::RPCLogType() : LogType(NAME, LEVEL, GetLogType()) {
 
 LogicalType RPCLogType::GetLogType() {
 	child_list_t<LogicalType> child_list = {
-	    {"message_type", LogicalType::VARCHAR},
-	    {"rpc_connection_id", LogicalType::VARCHAR},
-	    {"client_query_id", LogicalType::UBIGINT},
-	    {"query", LogicalType::VARCHAR},
-	    {"server", LogicalType::VARCHAR},
-	    {"duration_ms", LogicalType::BIGINT},
-	    {"response_type", LogicalType::VARCHAR},
-	    {"error", LogicalType::VARCHAR},
+	    {"message_type", LogicalType::VARCHAR},    {"rpc_connection_id", LogicalType::VARCHAR},
+	    {"client_query_id", LogicalType::UBIGINT}, {"query", LogicalType::VARCHAR},
+	    {"server", LogicalType::VARCHAR},          {"duration_ms", LogicalType::BIGINT},
+	    {"response_type", LogicalType::VARCHAR},   {"error", LogicalType::VARCHAR},
 	};
 	return LogicalType::STRUCT(child_list);
 }

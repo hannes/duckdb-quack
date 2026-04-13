@@ -2,14 +2,14 @@
 # description: test RPC and HTTP logging
 # group: [sql]
 
-require remote
+require quack
 
 # start server
 statement ok
 call rpc_generate_keys();
 
 statement ok con1
-call rpc_start('remote:localhost', disable_ssl=false);
+call rpc_start('quack:localhost', disable_ssl=false);
 
 sleep 100 millisecond
 
@@ -20,7 +20,7 @@ CALL enable_logging('RPC');
 
 # rpc_call should produce RPC log entries
 query I con2
-from rpc_call('remote:localhost', 'select 42 as answer', disable_ssl=false)
+from rpc_call('quack:localhost', 'select 42 as answer', disable_ssl=false)
 ----
 42
 
@@ -95,7 +95,7 @@ statement ok con2
 CALL truncate_duckdb_logs();
 
 statement error con2
-from rpc_call('remote:localhost', 'selexxxct 42', disable_ssl=false)
+from rpc_call('quack:localhost', 'selexxxct 42', disable_ssl=false)
 ----
 Error
 
@@ -116,7 +116,7 @@ statement ok con2
 CALL enable_logging('HTTP');
 
 query I con2
-from rpc_call('remote:localhost', 'select 1', disable_ssl=false)
+from rpc_call('quack:localhost', 'select 1', disable_ssl=false)
 ----
 1
 
@@ -143,4 +143,4 @@ statement ok con2
 CALL disable_logging();
 
 statement ok con1
-call rpc_stop('remote:localhost');
+call rpc_stop('quack:localhost');

@@ -65,7 +65,7 @@ RpcCatalog &GetRpcCatalog(ClientContext &context, Value &catalog_name) {
 		throw BinderException("Failed to find attached database \"%s\"", db_name);
 	}
 	auto &catalog = db->GetCatalog();
-	if (catalog.GetCatalogType() != "remote") {
+	if (catalog.GetCatalogType() != "quack") {
 		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
 	}
 	return catalog.Cast<RpcCatalog>();
