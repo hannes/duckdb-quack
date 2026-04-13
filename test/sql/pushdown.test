@@ -4,16 +4,18 @@
 
 require quack
 
-foreach server  '__TEST_DIR__/duckdb-rpc-socket-pushdown'
+foreach server 'quack:localhost'
+
+foreach ssl false true
 
 statement ok con1
 create table test_data as select range i, range * 2 as doubled, 'name_' || range::varchar as name from range(10000);
 
 statement ok con1
-call rpc_start(${server});
+call rpc_start({server}, disable_ssl={ssl});
 
 statement ok con2
-attach ${server} as rpc (TYPE rpc)
+attach {server} as rpc (disable_ssl {ssl})
 
 # Verify projection pushdown: selecting one column should only project that column
 query II
@@ -91,6 +93,8 @@ statement ok con2
 detach rpc;
 
 statement ok con1
-call rpc_stop(${server});
+call rpc_stop({server});
+
+endloop
 
 endloop

@@ -6,6 +6,8 @@ require quack
 
 foreach server 'quack:localhost'
 
+foreach ssl false true
+
 statement ok con1
 create table t1 as select range i from range(100);
 
@@ -13,10 +15,10 @@ statement ok con1
 create table t2 as select range j from range(200);
 
 statement ok con1
-call rpc_start(${server});
+call rpc_start({server}, disable_ssl={ssl});
 
 statement ok con2
-attach ${server} as rpc (TYPE rpc)
+attach {server} as rpc (disable_ssl {ssl})
 
 # Single table scan should work
 query I
@@ -41,6 +43,8 @@ statement ok con2
 detach rpc;
 
 statement ok con1
-call rpc_stop(${server});
+call rpc_stop({server});
+
+endloop
 
 endloop
