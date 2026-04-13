@@ -5,7 +5,7 @@ namespace duckdb {
 
 class RpcUri {
 public:
-	RpcUri() : RpcUri("remote:localhost") {
+	RpcUri() : RpcUri("quack:localhost") {
 	} // orrr
 
 	RpcUri(string uri_p, bool ssl_p = true) : ssl(ssl_p), uri(uri_p) {
@@ -16,14 +16,14 @@ public:
 
 		StringUtil::Trim(uri);
 		// first off, lets be tolerant and accept this variant, too
-		if (StringUtil::StartsWith(uri, "remote://")) {
-			uri = StringUtil::Replace(uri, "remote://", "remote:");
+		if (StringUtil::StartsWith(uri, "quack://")) {
+			uri = StringUtil::Replace(uri, "quack://", "quack:");
 		}
-		if (!StringUtil::StartsWith(uri, "remote:")) {
-			throw InvalidInputException("Invalid DuckDB remote URI, needs to start with 'remote:'");
+		if (!StringUtil::StartsWith(uri, "quack:")) {
+			throw InvalidInputException("Invalid DuckDB Quack RPC URI, needs to start with 'quack:'");
 		}
 
-		auto remainder = StringUtil::Replace(uri, "remote:", "");
+		auto remainder = StringUtil::Replace(uri, "quack:", "");
 		if (remainder.empty()) {
 			throw InvalidInputException("Missing hostname");
 		}

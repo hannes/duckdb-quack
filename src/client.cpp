@@ -51,10 +51,8 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 		int status = https_result ? https_result->status : -1;
 
 		child_list_t<Value> request_child_list = {
-		    {"type", Value("POST")},
-		    {"url", Value(uri.Http() + "/rpc")},
-		    {"start_time", Value()},
-		    {"duration_ms", Value::BIGINT(duration_ms)},
+		    {"type", Value("POST")}, {"url", Value(uri.Http() + "/rpc")},
+		    {"start_time", Value()}, {"duration_ms", Value::BIGINT(duration_ms)},
 		    {"headers", Value()},
 		};
 		auto request_value = Value::STRUCT(request_child_list);

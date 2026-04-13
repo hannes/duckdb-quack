@@ -7,7 +7,7 @@ import statistics
 duckdb_binary = './build/release/duckdb'
 print('method\tthreads\trows\tmedian_time_seconds')
 
-for duckdb_socket in ['remote:localhost']:
+for duckdb_socket in ['quack:localhost:1234']:
 #, '/tmp/duckdb-rpc-socket']:
 	server = subprocess.Popen([duckdb_binary, '-init', '/dev/null', '-cmd', f"set rpc_default_token='asdf'; CALL rpc_start('{duckdb_socket}')",  '-readonly', '~/nobackup/tpch-sf100.db'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 	# wait for socket to actually be open

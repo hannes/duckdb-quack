@@ -12,7 +12,7 @@ public:
 	RpcServer &FindOrCreateServer(ClientContext &context, const RpcUri &listen_uri);
 	bool StopServer(ClientContext &context, const RpcUri &listen_uri);
 
-	static constexpr const char *STORAGE_EXTENSION_KEY = "remote";
+	static constexpr const char *STORAGE_EXTENSION_KEY = "quack";
 
 private:
 	std::mutex servers_mutex;

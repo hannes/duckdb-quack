@@ -2,14 +2,11 @@
 # description: test rpc extension
 # group: [sql]
 
-require remote
+require quack
 
 require json
 
-statement ok
-call rpc_generate_keys();
-
-foreach server 'remote:localhost'
+foreach server 'quack:localhost'
 
 foreach ssl false true
 

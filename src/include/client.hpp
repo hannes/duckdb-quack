@@ -74,9 +74,9 @@ public:
 				if (response_message->Type() == MessageType::ERROR) {
 					error = response_message->Cast<ErrorMessage>().Error();
 				}
-				auto msg = RPCLogType::ConstructLogMessage(request_type, rpc_connection_id, client_query_id, query,
-				                                           uri.Http(), end_time - start_time,
-				                                           response_message->Type(), error);
+				auto msg =
+				    RPCLogType::ConstructLogMessage(request_type, rpc_connection_id, client_query_id, query, uri.Http(),
+				                                    end_time - start_time, response_message->Type(), error);
 				logger.WriteLog(RPCLogType::NAME, RPCLogType::LEVEL, msg);
 			}
 		}

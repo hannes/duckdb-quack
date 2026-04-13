@@ -35,8 +35,10 @@ void HttpsRpcServer::Listen(const RpcUri &uri) {
 		auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
 		auto server_key_file = fs.JoinPath(certificate_directory, "server.pem");
 		auto private_key_file = fs.JoinPath(certificate_directory, "private_key.pem");
+		if (!fs.FileExists(server_key_file) || !fs.FileExists(private_key_file)) {
+			SslKeyGenerator::GenerateSslKeys(server_key_file, private_key_file, "", 3650);
+		}
 		// auto dh_param_file = fs.JoinPath(certificate_directory, "dh.pem");
-		// TODO check if those files are there
 		server = make_uniq<duckdb_httplib_openssl::SSLServer>(server_key_file.c_str(), private_key_file.c_str());
 	} else {
 		server = make_uniq<duckdb_httplib_openssl::Server>();
@@ -52,8 +54,7 @@ void HttpsRpcServer::Listen(const RpcUri &uri) {
 	};
 
 	server->Get("/", [=](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res) {
-		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'remote:...' to connect here.\n",
-		                "text/plain");
+		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'quack:...' to connect here.\n", "text/plain");
 	});
 	server->Post("/rpc", [&](const duckdb_httplib_openssl::Request &req, duckdb_httplib_openssl::Response &res,
 	                         const duckdb_httplib_openssl::ContentReader &content_reader) {
@@ -67,7 +68,7 @@ void HttpsRpcServer::Listen(const RpcUri &uri) {
 	});
 
 	if (!server->is_valid()) {
-		throw IOException("Failed to instantiate Quack RPC server at %s / %s", uri.Uri(), uri.Http());
+		throw IOException("Failed to instantiate DuckDB server at %s / %s", uri.Uri(), uri.Http());
 	}
 
 	listen_threads.push_back(std::thread(ListenThread, this, uri.Host(), uri.Port()));

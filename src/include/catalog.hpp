@@ -109,7 +109,7 @@ public:
 
 public:
 	string GetCatalogType() override {
-		return "remote";
+		return "quack";
 	}
 	void Initialize(bool load_builtin) override;
 

@@ -2,7 +2,7 @@
 # description: test filter and projection pushdown for RPC catalog scans
 # group: [sql]
 
-require rpc
+require quack
 
 foreach server  '__TEST_DIR__/duckdb-rpc-socket-pushdown'
 

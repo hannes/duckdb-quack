@@ -2,7 +2,7 @@
 # description: test rpc extension
 # group: [sql]
 
-require remote
+require quack
 
 
 statement ok
@@ -14,10 +14,7 @@ create table fuu as values(42, 43);
 statement ok
 create table moo.fuu2 as values(44, 45);
 
-statement ok
-call rpc_generate_keys();
-
-foreach server 'remote:localhost'
+foreach server 'quack:localhost'
 
 foreach ssl false true
 

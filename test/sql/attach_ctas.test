@@ -2,9 +2,9 @@
 # description: test CREATE TABLE AS over rpc attach
 # group: [sql]
 
-require rpc
+require quack
 
-foreach server 'remote:localhost'
+foreach server 'quack:localhost'
 
 statement ok con1
 call rpc_start(${server});
