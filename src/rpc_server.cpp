@@ -234,12 +234,16 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
 
-		constexpr idx_t MAX_CHUNKS_PER_BATCH = 12;
-		constexpr idx_t MAX_BYTES_PER_BATCH = 4 * (1 << 20); // 4 MiB
+		Value max_chunks_val;
+		Value max_bytes_val;
+		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
+		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_bytes", max_bytes_val);
+		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
+		auto max_bytes_per_batch = max_bytes_val.GetValue<uint64_t>();
 
 		vector<unique_ptr<DataChunk>> batch;
 		idx_t bytes_est = 0;
-		while (batch.size() < MAX_CHUNKS_PER_BATCH && bytes_est < MAX_BYTES_PER_BATCH) {
+		while (batch.size() < max_chunks_per_batch && bytes_est < max_bytes_per_batch) {
 			auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
 			if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
 				auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
