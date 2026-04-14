@@ -185,24 +185,19 @@ unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deser
 
 void FetchResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
-	auto response_data_present = response_data && response_data->size() > 0;
-	serializer.WriteProperty<bool>(250, "response_data_present", response_data_present);
-	if (response_data_present) {
-		serializer.WriteObject(251, "response_data",
-		                       [&](Serializer &inner_serializer) { response_data->Serialize(inner_serializer); });
-	}
+	serializer.WriteList(252, "chunks", chunks.size(), [&](Serializer::List &list, idx_t i) {
+		list.WriteObject([&](Serializer &inner) { chunks[i]->Serialize(inner); });
+	});
 }
 
 unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto response_data_present = deserializer.ReadProperty<bool>(250, "response_data_present");
-	if (!response_data_present) {
-		return make_uniq<FetchResponseMessage>(nullptr);
-	}
-
-	auto result_chunk = make_uniq<DataChunk>();
-	deserializer.ReadObject(251, "response_data",
-	                        [&](Deserializer &inner_deserializer) { result_chunk->Deserialize(inner_deserializer); });
-	return make_uniq<FetchResponseMessage>(std::move(result_chunk));
+	vector<unique_ptr<DataChunk>> chunks;
+	deserializer.ReadList(252, "chunks", [&](Deserializer::List &list, idx_t i) {
+		auto chunk = make_uniq<DataChunk>();
+		list.ReadObject([&](Deserializer &inner) { chunk->Deserialize(inner); });
+		chunks.push_back(std::move(chunk));
+	});
+	return make_uniq<FetchResponseMessage>(std::move(chunks));
 }
 
 void ErrorMessage::Serialize(Serializer &serializer) const {

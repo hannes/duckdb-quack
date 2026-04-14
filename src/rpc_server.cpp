@@ -228,22 +228,32 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 
 		if (!rpc_connection->duckdb_query_result) {
-			return make_uniq<FetchResponseMessage>(nullptr);
+			return make_uniq<FetchResponseMessage>();
 		}
 		if (rpc_connection->duckdb_query_result->HasError()) {
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
-		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
-		if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
-			auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
-			rpc_connection->duckdb_query_result.reset();
-			return error;
+
+		constexpr idx_t MAX_CHUNKS_PER_BATCH = 12;
+		constexpr idx_t MAX_BYTES_PER_BATCH = 4 * (1 << 20); // 4 MiB
+
+		vector<unique_ptr<DataChunk>> batch;
+		idx_t bytes_est = 0;
+		while (batch.size() < MAX_CHUNKS_PER_BATCH && bytes_est < MAX_BYTES_PER_BATCH) {
+			auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
+			if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
+				auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
+				rpc_connection->duckdb_query_result.reset();
+				return error;
+			}
+			if (!result_chunk || result_chunk->size() == 0) {
+				rpc_connection->duckdb_query_result.reset();
+				break;
+			}
+			bytes_est += result_chunk->size() * result_chunk->ColumnCount() * 8;
+			batch.push_back(std::move(result_chunk));
 		}
-		if (!result_chunk || result_chunk->size() == 0) {
-			rpc_connection->duckdb_query_result.reset();
-			return make_uniq<FetchResponseMessage>(nullptr);
-		}
-		return make_uniq<FetchResponseMessage>(std::move(result_chunk));
+		return make_uniq<FetchResponseMessage>(std::move(batch));
 	}
 
 	case MessageType::CATALOG_REQUEST: {

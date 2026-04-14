@@ -132,10 +132,12 @@ unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query)
 	chunk_collection->Initialize(response->Types());
 	while (true) {
 		auto fetch_response = client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
-		if (!fetch_response || !fetch_response->ResponseData() || fetch_response->ResponseData()->size() == 0) {
+		if (!fetch_response || fetch_response->Chunks().empty()) {
 			break;
 		}
-		chunk_collection->Append(*fetch_response->ResponseData());
+		for (auto &chunk : fetch_response->Chunks()) {
+			chunk_collection->Append(*chunk);
+		}
 	}
 	return chunk_collection;
 }
