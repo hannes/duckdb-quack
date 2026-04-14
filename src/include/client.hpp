@@ -49,8 +49,11 @@ public:
 			break;
 		}
 
-		// Inject client_query_id from context into the message before sending
-		if (context) {
+		// Inject client_query_id from context into the message before sending.
+		// Guard against reading the active query during transaction start itself
+		// (e.g. BEGIN TRANSACTION via RpcCatalog::ExecuteCommand), where the
+		// transaction isn't yet installed on the TransactionContext.
+		if (context && context->transaction.HasActiveTransaction()) {
 			client_query_id = context->transaction.GetActiveQuery();
 			request_message->SetClientQueryId(client_query_id);
 		}

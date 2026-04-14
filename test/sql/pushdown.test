@@ -4,12 +4,12 @@
 
 require quack
 
+statement ok con1
+create table test_data as select range i, range * 2 as doubled, 'name_' || range::varchar as name from range(10000);
+
 foreach server 'quack:localhost'
 
 foreach ssl false true
-
-statement ok con1
-create table test_data as select range i, range * 2 as doubled, 'name_' || range::varchar as name from range(10000);
 
 statement ok con1
 call rpc_start({server}, disable_ssl={ssl});
