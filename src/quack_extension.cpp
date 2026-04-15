@@ -10,12 +10,47 @@
 #include "rpc_uri.hpp"
 
 #include "duckdb/logging/log_manager.hpp"
+#include "duckdb/main/secret/secret.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/storage/storage_extension.hpp"
 
 #include "catalog.hpp"
 #include "duckdb/parser/parser.hpp"
 
 namespace duckdb {
+
+static constexpr const char *QUACK_SECRET_TYPE = "quack";
+
+static unique_ptr<BaseSecret> CreateQuackSecretFromConfig(ClientContext &, CreateSecretInput &input) {
+	auto scope = input.scope;
+	if (scope.empty()) {
+		scope.emplace_back("quack:");
+	}
+	auto secret = make_uniq<KeyValueSecret>(scope, input.type, input.provider, input.name);
+	for (const auto &named_param : input.options) {
+		auto lower_name = StringUtil::Lower(named_param.first);
+		if (lower_name == "token") {
+			secret->secret_map["token"] = named_param.second.ToString();
+		} else {
+			throw InvalidInputException("Unknown named parameter for quack secret: %s", lower_name);
+		}
+	}
+	secret->redact_keys = {"token"};
+	return std::move(secret);
+}
+
+static void RegisterQuackSecretType(ExtensionLoader &loader) {
+	SecretType secret_type;
+	secret_type.name = QUACK_SECRET_TYPE;
+	secret_type.deserializer = KeyValueSecret::Deserialize<KeyValueSecret>;
+	secret_type.default_provider = "config";
+	secret_type.extension = "quack";
+	loader.RegisterSecretType(secret_type);
+
+	CreateSecretFunction config_fun = {QUACK_SECRET_TYPE, "config", CreateQuackSecretFromConfig};
+	config_fun.named_parameters["token"] = LogicalType::VARCHAR;
+	loader.RegisterFunction(config_fun);
+}
 
 static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                      AttachedDatabase &db, const string &name, AttachInfo &info,
@@ -120,6 +155,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                                                   {"url", LogicalType::VARCHAR}}),
 	                              RpcUriParser);
 	loader.RegisterFunction(rpc_uri_parser);
+
+	RegisterQuackSecretType(loader);
 
 	loader.GetDatabaseInstance().GetLogManager().RegisterLogType(make_uniq<RPCLogType>());
 

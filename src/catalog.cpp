@@ -5,6 +5,8 @@
 #include "rpc_insert.hpp"
 
 #include "duckdb/common/exception.hpp"
+#include "duckdb/main/secret/secret.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
@@ -75,16 +77,27 @@ RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, Clien
     : Catalog(db_p), server_uri(server_uri_p), client(RpcClient::GetClient(server_uri)) {
 	client->SetContext(&context);
 
-	// evil copy paste
-	Value default_token_val;
-	auto &config = DBConfig::GetConfig(db_p.GetDatabase());
+	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
+	// global rpc_default_token setting.
+	string token;
+	auto &secret_manager = SecretManager::Get(context);
+	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
+	auto match = secret_manager.LookupSecret(transaction, server_uri.Uri(), "quack");
+	if (match.HasMatch()) {
+		const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
+		token = kv.TryGetValue("token", true).ToString();
+	} else {
+		Value default_token_val;
+		auto &config = DBConfig::GetConfig(db_p.GetDatabase());
+		auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+		D_ASSERT(lookup_result_token);
+		if (!default_token_val.IsNull()) {
+			token = default_token_val.GetValue<string>();
+		}
+	}
 
-	// TODO there could be a race condition here, lock this
-	auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-	D_ASSERT(lookup_result_token);
-
-	auto connection_response = client->Request<ConnectionResponseMessage>(
-	    make_uniq<ConnectionRequestMessage>(default_token_val.GetValue<string>()));
+	auto connection_response =
+	    client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
 	connection_id = connection_response->ConnectionId();
 
 	// TODO a tiiny bit clunky this
