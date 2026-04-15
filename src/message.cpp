@@ -52,35 +52,6 @@ unique_ptr<ProtocolMessage> ProtocolMessage::FromMemoryStream(MemoryStream &read
 	return Deserialize(deserializer);
 }
 
-unique_ptr<ProtocolMessage> ProtocolMessage::FromSocket(int fd, MemoryStream &read_stream) {
-	idx_t msg_len;
-	auto data_recv_header = recv(fd, &msg_len, sizeof(idx_t), MSG_WAITALL);
-	if (data_recv_header != sizeof(idx_t)) {
-		throw IOException("Failed to receive message length: %s", strerror(errno));
-	}
-	read_stream.Rewind();
-	read_stream.GrowCapacity(msg_len);
-
-	auto data_recv_message = recv(fd, (void *)read_stream.GetData(), msg_len, MSG_WAITALL);
-	if (data_recv_message != msg_len) {
-		throw IOException("Failed to receive message body (length %llu): %s", msg_len, strerror(errno));
-	}
-	return FromMemoryStream(read_stream);
-}
-
-void ProtocolMessage::ToSocket(int fd, MemoryStream &write_stream) const {
-	write_stream.Rewind();
-	ToMemoryStream(write_stream);
-
-	idx_t msg_len = write_stream.GetPosition();
-	if (send(fd, &msg_len, sizeof(idx_t), 0) != sizeof(idx_t)) {
-		throw IOException("Failed to send message length (%llu): %s", msg_len, strerror(errno));
-	}
-	if (send(fd, write_stream.GetData(), msg_len, 0) != msg_len) {
-		throw IOException("Failed to send message body (length %llu): %s", msg_len, strerror(errno));
-	}
-}
-
 void ProtocolMessage::Serialize(Serializer &serializer) const {
 	serializer.WriteProperty<uint8_t>(10, "message_type", static_cast<uint8_t>(message_type));
 }

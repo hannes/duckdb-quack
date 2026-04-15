@@ -29,10 +29,6 @@ public:
 	void ToMemoryStream(MemoryStream &write_stream) const;
 	static unique_ptr<ProtocolMessage> FromMemoryStream(MemoryStream &read_stream);
 
-	void ToSocket(int fd, MemoryStream &write_stream) const;
-
-	static unique_ptr<ProtocolMessage> FromSocket(int fd, MemoryStream &read_stream);
-
 	template <class TARGET>
 	TARGET &Cast() {
 		if (message_type != TARGET::TYPE) {
