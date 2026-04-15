@@ -186,17 +186,22 @@ class FetchResponseMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::FETCH_RESPONSE;
 
-	explicit FetchResponseMessage(unique_ptr<DataChunk> response_data_p)
-	    : ProtocolMessage(TYPE), response_data(std::move(response_data_p)) {};
+	FetchResponseMessage() : ProtocolMessage(TYPE) {};
+	explicit FetchResponseMessage(vector<unique_ptr<DataChunk>> chunks_p)
+	    : ProtocolMessage(TYPE), chunks(std::move(chunks_p)) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
-	optional_ptr<DataChunk> ResponseData() const {
-		return response_data.get();
+
+	const vector<unique_ptr<DataChunk>> &Chunks() const {
+		return chunks;
+	}
+	vector<unique_ptr<DataChunk>> &MutableChunks() {
+		return chunks;
 	}
 
 private:
-	unique_ptr<DataChunk> response_data;
+	vector<unique_ptr<DataChunk>> chunks;
 };
 
 // orrr

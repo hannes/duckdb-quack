@@ -11,6 +11,8 @@
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 
+#include <queue>
+
 using namespace duckdb;
 
 static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBindInput &input,
@@ -98,6 +100,8 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 
 struct RpcLocalState : public LocalTableFunctionState {
 	unique_ptr<RpcClient> client;
+	std::queue<unique_ptr<DataChunk>> pending;
+	bool server_exhausted = false;
 
 	explicit RpcLocalState() {
 	}
@@ -241,17 +245,30 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	auto &global_state = input.global_state->Cast<RpcGlobalState>();
 	auto &local_state = input.local_state->Cast<RpcLocalState>();
 
-	if (global_state.done) {
-		return;
+	// Only issue a new FETCH if we've drained our local batch and the stream
+	// hasn't signalled end. global_state.done is an optimization hint that
+	// skips wasted FETCHes — it must not pre-empt draining local pending.
+	if (local_state.pending.empty() && !local_state.server_exhausted && !global_state.done) {
+		auto fetch_response =
+		    local_state.client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
+		if (fetch_response->Chunks().empty()) {
+			local_state.server_exhausted = true;
+			global_state.done = true;
+		} else {
+			for (auto &chunk : fetch_response->MutableChunks()) {
+				local_state.pending.push(std::move(chunk));
+			}
+		}
 	}
-	auto fetch_response =
-	    local_state.client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
-	if (!fetch_response->ResponseData() || fetch_response->ResponseData()->size() == 0) {
-		global_state.done = true;
+
+	if (local_state.pending.empty()) {
 		return;
 	}
 
-	auto &response_chunk = *fetch_response->ResponseData();
+	auto chunk = std::move(local_state.pending.front());
+	local_state.pending.pop();
+
+	auto &response_chunk = *chunk;
 	if (response_chunk.ColumnCount() == output.ColumnCount()) {
 		output.Reference(response_chunk);
 	} else {

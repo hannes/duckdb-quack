@@ -228,22 +228,36 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		std::unique_lock<std::mutex> lock(rpc_connection->lock);
 
 		if (!rpc_connection->duckdb_query_result) {
-			return make_uniq<FetchResponseMessage>(nullptr);
+			return make_uniq<FetchResponseMessage>();
 		}
 		if (rpc_connection->duckdb_query_result->HasError()) {
 			return make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
 		}
-		auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
-		if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
-			auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
-			rpc_connection->duckdb_query_result.reset();
-			return error;
+
+		Value max_chunks_val;
+		Value max_bytes_val;
+		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
+		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_bytes", max_bytes_val);
+		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
+		auto max_bytes_per_batch = max_bytes_val.GetValue<uint64_t>();
+
+		vector<unique_ptr<DataChunk>> batch;
+		idx_t bytes_est = 0;
+		while (batch.size() < max_chunks_per_batch && bytes_est < max_bytes_per_batch) {
+			auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
+			if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
+				auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
+				rpc_connection->duckdb_query_result.reset();
+				return error;
+			}
+			if (!result_chunk || result_chunk->size() == 0) {
+				rpc_connection->duckdb_query_result.reset();
+				break;
+			}
+			bytes_est += result_chunk->size() * result_chunk->ColumnCount() * 8;
+			batch.push_back(std::move(result_chunk));
 		}
-		if (!result_chunk || result_chunk->size() == 0) {
-			rpc_connection->duckdb_query_result.reset();
-			return make_uniq<FetchResponseMessage>(nullptr);
-		}
-		return make_uniq<FetchResponseMessage>(std::move(result_chunk));
+		return make_uniq<FetchResponseMessage>(std::move(batch));
 	}
 
 	case MessageType::CATALOG_REQUEST: {
