@@ -3,18 +3,10 @@
 #define ASIO_STANDALONE // no boost!
 
 #include "duckdb/common/optional_ptr.hpp"
-#include "duckdb/common/mutex.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 #include "rpc_uri.hpp"
 
 #include <thread>
-
-#include <sys/un.h>
-//
-// // TODO don't like those includes here...
-// #include "websocketpp/config/asio.hpp"
-// #include "websocketpp/config/asio_client.hpp"
-// #include "websocketpp/server.hpp"
 
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.hpp"
