@@ -7,8 +7,6 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/planner/table_filter.hpp"
-#include "duckdb/planner/table_filter_set.hpp"
-#include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 
 #include <queue>
@@ -181,26 +179,26 @@ static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFuncti
 		query = "SELECT *";
 	}
 	query += StringUtil::Format(" FROM %s", bind_data.table_name);
-
-	// Filters: build WHERE clause from pushable filters
-	if (input.filters) {
-		vector<string> where_clauses;
-		for (auto &entry : *input.filters) {
-			auto col_idx = entry.GetIndex().GetIndex();
-			if (col_idx >= bind_data.column_names.size()) {
-				continue;
-			}
-			auto &filter = entry.Filter();
-			if (!CanPushdownFilter(filter)) {
-				continue;
-			}
-			auto col_name = KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_idx]);
-			where_clauses.push_back(filter.ToString(col_name));
-		}
-		if (!where_clauses.empty()) {
-			query += " WHERE " + StringUtil::Join(where_clauses, " AND ");
-		}
-	}
+	//
+	// // Filters: build WHERE clause from pushable filters
+	// if (input.filters) {
+	// 	vector<string> where_clauses;
+	// 	for (auto &entry : input.filters->filters) {
+	// 		auto col_idx = entry.second.GetIndex();
+	// 		if (col_idx >= bind_data.column_names.size()) {
+	// 			continue;
+	// 		}
+	// 		auto &filter = entry.Filter();
+	// 		if (!CanPushdownFilter(filter)) {
+	// 			continue;
+	// 		}
+	// 		auto col_name = KeywordHelper::WriteOptionallyQuoted(bind_data.column_names[col_idx]);
+	// 		where_clauses.push_back(filter.ToString(col_name));
+	// 	}
+	// 	if (!where_clauses.empty()) {
+	// 		query += " WHERE " + StringUtil::Join(where_clauses, " AND ");
+	// 	}
+	// }
 
 	return query;
 }
@@ -295,8 +293,8 @@ TableFunction RpcScanFunction::GetFunction() {
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
-	fun.filter_pushdown = true;
-	fun.filter_prune = true;
+	// fun.filter_pushdown = true;
+	// fun.filter_prune = true;
 	return fun;
 }
 
@@ -305,7 +303,7 @@ TableFunction RpcScanByNameFunction::GetFunction() {
 	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
-	fun.filter_pushdown = true;
-	fun.filter_prune = true;
+	// fun.filter_pushdown = true;
+	// fun.filter_prune = true;
 	return fun;
 }
