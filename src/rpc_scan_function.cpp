@@ -10,7 +10,6 @@
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 
 #include <queue>
-
 using namespace duckdb;
 
 static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBindInput &input,
@@ -100,6 +99,10 @@ struct RpcLocalState : public LocalTableFunctionState {
 	unique_ptr<RpcClient> client;
 	std::queue<unique_ptr<DataChunk>> pending;
 	bool server_exhausted = false;
+	//! batch_index of the batch that `pending` currently holds chunks from (server-assigned).
+	//! Surfaced to DuckDB via get_partition_data so downstream order-preserving operators
+	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
+	optional_idx current_batch_index;
 
 	explicit RpcLocalState() {
 	}
@@ -253,6 +256,10 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 			local_state.server_exhausted = true;
 			global_state.done = true;
 		} else {
+			// Record this batch's server-assigned index so DuckDB can restore order
+			// downstream when chunks from this local state are interleaved with those
+			// produced by sibling threads.
+			local_state.current_batch_index = fetch_response->BatchIndex();
 			for (auto &chunk : fetch_response->MutableChunks()) {
 				local_state.pending.push(std::move(chunk));
 			}
@@ -287,12 +294,22 @@ static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const F
 	return nullptr;
 }
 
+static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
+	auto &local_state = input.local_state->Cast<RpcLocalState>();
+	// If we haven't received a batch yet, fall back to 0 so downstream doesn't choke; the
+	// planner only calls this after RpcScan has returned rows, by which point the current
+	// batch index is always set.
+	auto idx = local_state.current_batch_index.IsValid() ? local_state.current_batch_index.GetIndex() : 0;
+	return OperatorPartitionData(idx);
+}
+
 TableFunction RpcScanFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                         RpcInitLocal);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
+	fun.get_partition_data = RpcGetPartitionData;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
@@ -303,6 +320,7 @@ TableFunction RpcScanByNameFunction::GetFunction() {
 	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
+	fun.get_partition_data = RpcGetPartitionData;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;

@@ -26,6 +26,8 @@ struct RpcConnection {
 	unique_ptr<Connection> duckdb_connection;
 	//	unordered_map<string, std::pair<unique_ptr<PreparedStatement>, unique_ptr<QueryResult>>> duckdb_statements;
 	unique_ptr<QueryResult> duckdb_query_result;
+	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
+	idx_t next_batch_index = 0;
 };
 
 class RpcServer {
