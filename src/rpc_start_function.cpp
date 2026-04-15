@@ -3,7 +3,6 @@
 #include "ssl_key_generator.hpp"
 #include "duckdb/main/database.hpp"
 
-#include <unistd.h>
 #include <sys/stat.h>
 
 using namespace duckdb;
