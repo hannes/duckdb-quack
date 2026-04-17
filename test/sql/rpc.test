@@ -6,6 +6,8 @@ require quack
 
 require json
 
+require httpfs
+
 foreach server 'quack:localhost'
 
 foreach ssl true

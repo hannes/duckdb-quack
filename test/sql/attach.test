@@ -4,6 +4,7 @@
 
 require quack
 
+require httpfs
 
 statement ok
 create schema moo;

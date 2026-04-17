@@ -9,3 +9,4 @@ duckdb_extension_load(quack
 # Any extra extensions that should be built
 duckdb_extension_load(json)
 duckdb_extension_load(autocomplete)
+duckdb_extension_load(httpfs)

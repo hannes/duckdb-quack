@@ -4,6 +4,8 @@
 
 require quack
 
+require httpfs
+
 foreach server 'quack:localhost'
 
 

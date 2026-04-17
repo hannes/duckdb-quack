@@ -4,6 +4,8 @@
 
 require quack
 
+require httpfs
+
 statement ok con1
 create table t1 as select range i from range(100);
 

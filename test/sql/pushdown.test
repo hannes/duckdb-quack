@@ -4,6 +4,8 @@
 
 require quack
 
+require httpfs
+
 statement ok con1
 create table test_data as select range i, range * 2 as doubled, 'name_' || range::varchar as name from range(10000);
 
