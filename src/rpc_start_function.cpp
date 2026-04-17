@@ -1,6 +1,5 @@
 #include "rpc_start_function.hpp"
 #include "rpc_storage_extension.hpp"
-#include "ssl_key_generator.hpp"
 #include "duckdb/main/database.hpp"
 
 #include <sys/stat.h>
@@ -134,45 +133,4 @@ static unique_ptr<FunctionData> RpcGenerateKeysBind(ClientContext &context, Tabl
 	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("Status");
 	return std::move(result);
-}
-
-static void RpcGenerateKeysFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &bind_data = data_p.bind_data->CastNoConst<RpcGenerateKeysFunctionData>();
-	if (bind_data.finished) {
-		return;
-	}
-
-	output.SetCardinality(1);
-	bind_data.finished = true;
-
-	auto &fs = FileSystem::GetFileSystem(context);
-
-	auto certificate_directory = SslKeyGenerator::GetDefaultCertificateDirectory(fs);
-
-	auto server_key_file = fs.JoinPath(certificate_directory, "server.pem");
-	auto private_key_file = fs.JoinPath(certificate_directory, "private_key.pem");
-	auto dh_param_file = fs.JoinPath(certificate_directory, "dh.pem");
-
-	output.SetCardinality(1);
-	bind_data.finished = true;
-	if (fs.FileExists(server_key_file) || fs.FileExists(private_key_file) || fs.FileExists(dh_param_file)) {
-		output.data[0].SetValue(
-		    0, StringUtil::Format("Key file(s) exist in %s - remove to recreate them", certificate_directory));
-		return;
-	}
-	SslKeyGenerator::GenerateSslKeys(server_key_file, private_key_file, dh_param_file, 3650);
-	if (chmod(server_key_file.c_str(), 400) || chmod(private_key_file.c_str(), 400) /*||
-	    chmod(dh_param_file.c_str(), S_IRUSR)*/) {
-		unlink(server_key_file.c_str());
-		unlink(private_key_file.c_str());
-		//	unlink(dh_param_file.c_str());
-		throw IOException("Error setting permissions on key files");
-	}
-
-	output.data[0].SetValue(0, StringUtil::Format("Key files generated in %s", certificate_directory));
-}
-
-TableFunction RpcGenerateKeysFunction::GetFunction() {
-	// TODO add a named parameter to specify where the keys are
-	return TableFunction("rpc_generate_keys", {}, RpcGenerateKeysFun, RpcGenerateKeysBind);
 }

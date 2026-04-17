@@ -1,14 +1,11 @@
 #pragma once
 
-#define ASIO_STANDALONE // no boost!
-
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/shared_ptr.hpp"
 #include "rpc_uri.hpp"
 
 #include <thread>
 
-#define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.hpp"
 
 namespace duckdb {
@@ -54,18 +51,18 @@ protected:
 	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
 };
 
-class HttpsRpcServer : public RpcServer {
+class HttpRpcServer : public RpcServer {
 public:
-	HttpsRpcServer(ClientContext &context_p) : RpcServer(context_p) {
+	HttpRpcServer(ClientContext &context_p) : RpcServer(context_p) {
 	}
 	void Listen(const RpcUri &uri) override;
 
-	~HttpsRpcServer() override;
+	~HttpRpcServer() override;
 
 private:
-	static void ListenThread(HttpsRpcServer *rpc_server, const string &listen_host, int listen_port);
+	static void ListenThread(HttpRpcServer *rpc_server, const string &listen_host, int listen_port);
 
-	unique_ptr<duckdb_httplib_openssl::Server> server;
+	unique_ptr<duckdb_httplib::Server> server;
 };
 ;
 

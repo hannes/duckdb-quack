@@ -13,7 +13,6 @@
 #include "duckdb/main/database.hpp"
 
 #include "duckdb/common/types/blob.hpp"
-#include <openssl/rand.h>
 
 using namespace duckdb;
 
@@ -100,16 +99,7 @@ static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... v
 }
 
 string RpcServer::GenerateSessionId() {
-	string session_id_bytes;
-	session_id_bytes.resize(32);
-	// we force the use of the (safer) OpenSSL random generator here, the session ids should really not be
-	// predictable
-	if (!RAND_bytes((unsigned char *)session_id_bytes.data(), session_id_bytes.size())) {
-		throw InternalException("RAND_bytes failed");
-	}
-	auto session_id = Blob::ToBase64(session_id_bytes);
-	D_ASSERT(!session_id.empty());
-	return session_id;
+	return StringUtil::GenerateRandomName(32);
 }
 
 // Extract connection_id from a message if available

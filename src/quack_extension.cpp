@@ -13,6 +13,7 @@
 #include "duckdb/storage/storage_extension.hpp"
 
 #include "catalog.hpp"
+#include "duckdb/parser/parser.hpp"
 
 namespace duckdb {
 
@@ -64,6 +65,15 @@ static void RpcDummyAuthorization(const DataChunk &args, ExpressionState &, Vect
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR); // query
 	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
 
+	Parser parser;
+	auto q = args.GetValue(1, 0).GetValue<string>();
+	parser.ParseQuery(q);
+	for (auto &statement : parser.statements) {
+		if (statement->TYPE != StatementType::SELECT_STATEMENT) {
+			// TODO
+		}
+	}
+
 	result.SetValue(0, Value(true)); // choose life
 }
 
@@ -90,7 +100,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	loader.RegisterFunction(RpcStartFunction::GetFunction());
 	loader.RegisterFunction(RpcStopFunction::GetFunction());
-	loader.RegisterFunction(RpcGenerateKeysFunction::GetFunction());
 
 	// the default authentication function
 	ScalarFunction rpc_auth_token("rpc_auth_token",

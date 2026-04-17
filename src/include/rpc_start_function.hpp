@@ -14,8 +14,4 @@ public:
 	static TableFunction GetFunction();
 };
 
-class RpcGenerateKeysFunction {
-public:
-	static TableFunction GetFunction();
-};
 } // namespace duckdb

@@ -20,7 +20,7 @@ RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, c
 		return *it->second;
 	}
 	unique_ptr<RpcServer> server;
-	server = make_uniq<HttpsRpcServer>(context);
+	server = make_uniq<HttpRpcServer>(context);
 	server->Listen(listen_uri);
 	servers.emplace(listen_uri.Uri(), std::move(server));
 	return *servers[listen_uri.Uri()];
