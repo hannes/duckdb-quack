@@ -6,6 +6,8 @@ require quack
 
 require httpfs
 
+set ignore_error_messages __none__
+
 statement ok con1
 create table t1 as select range i from range(100);
 
@@ -17,10 +19,10 @@ foreach server 'quack:localhost'
 foreach ssl true
 
 statement ok con1
-call rpc_start({server}, disable_ssl={ssl});
+call rpc_start({server}, disable_ssl=true);
 
 statement ok con2
-attach {server} as rpc (disable_ssl {ssl})
+attach {server} as rpc (disable_ssl true);
 
 # Single table scan should work
 query I
