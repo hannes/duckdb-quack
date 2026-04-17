@@ -37,12 +37,12 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 		return new duckdb_httplib::ThreadPool(128);
 	};
 
-	server->Get("/", [=](const duckdb_httplib::Request &req, duckdb_httplib::Response &res) {
+	server->Get("/", [=](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
 		res.set_content("This is a DuckDB Quack RPC endpoint. Use ATTACH 'quack:...' to connect here.\n", "text/plain");
 	});
 
-	// TODO: this is very liberal, and there might be reasonable cases to restrict to trusted domains (note, this is only
-	// relevant from within a Web browser, since other actors can just ignore the CORS convention
+	// TODO: this is very liberal, and there might be reasonable cases to restrict to trusted domains (note, this is
+	// only relevant from within a Web browser, since other actors can just ignore the CORS convention
 	server->Options("/rpc", [](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
 		res.set_header("Access-Control-Allow-Origin", "*");
 		res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -50,7 +50,7 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 		res.status = 204;
 	});
 
-	server->Post("/rpc", [&](const duckdb_httplib::Request &req, duckdb_httplib::Response &res,
+	server->Post("/rpc", [&](const duckdb_httplib::Request &, duckdb_httplib::Response &res,
 	                         const duckdb_httplib::ContentReader &content_reader) {
 		MemoryStream stream;
 		content_reader([&](const char *data, size_t data_length) {

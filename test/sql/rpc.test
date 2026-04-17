@@ -8,7 +8,7 @@ require json
 
 foreach server 'quack:localhost'
 
-foreach ssl false true
+foreach ssl true
 
 
 statement ok con1

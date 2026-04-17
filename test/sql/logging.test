@@ -4,15 +4,11 @@
 
 require quack
 
-# start server
-statement ok
-call rpc_generate_keys();
-
 statement ok
 set rpc_default_token='asdf'
 
 statement ok con1
-call rpc_start('quack:localhost', disable_ssl=false);
+call rpc_start('quack:localhost', disable_ssl=true);
 
 sleep 100 millisecond
 
@@ -23,7 +19,7 @@ CALL enable_logging('RPC');
 
 # rpc_call should produce RPC log entries
 query I con2
-from rpc_call('quack:localhost', 'select 42 as answer', disable_ssl=false)
+from rpc_call('quack:localhost', 'select 42 as answer', disable_ssl=true)
 ----
 42
 
@@ -98,7 +94,7 @@ statement ok con2
 CALL truncate_duckdb_logs();
 
 statement error con2
-from rpc_call('quack:localhost', 'selexxxct 42', disable_ssl=false)
+from rpc_call('quack:localhost', 'selexxxct 42', disable_ssl=true)
 ----
 Error
 
@@ -119,7 +115,7 @@ statement ok con2
 CALL enable_logging('HTTP');
 
 query I con2
-from rpc_call('quack:localhost', 'select 1', disable_ssl=false)
+from rpc_call('quack:localhost', 'select 1', disable_ssl=true)
 ----
 1
 

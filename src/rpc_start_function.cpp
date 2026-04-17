@@ -22,9 +22,16 @@ static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFuncti
 	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
 		throw InvalidInputException("Invalid listen string specified");
 	}
-	auto disable_ssl = input.named_parameters.find("disable_ssl") != input.named_parameters.end() &&
-	                   input.named_parameters["disable_ssl"].GetValue<bool>();
-	bind_data->listen_uri = RpcUri(uri_value.GetValue<string>(), !disable_ssl);
+
+	auto allow_other_hostname = input.named_parameters.find("allow_other_hostname") != input.named_parameters.end() &&
+	                            input.named_parameters["allow_other_hostname"].GetValue<bool>();
+
+	bind_data->listen_uri = RpcUri(uri_value.GetValue<string>(), /* the server will always listen without SSL */ false);
+	if (!allow_other_hostname && !bind_data->listen_uri.IsLocal()) {
+		throw InvalidInputException(
+		    "Only localhost is allowed as a Quack RPC hostname by default, set allow_other_hostname=true to override. "
+		    "We strongly recommend reverse-proxying the Quack RPC when making it publicly available.");
+	}
 
 	return_types.emplace_back(LogicalType::VARCHAR);
 	return_types.emplace_back(LogicalType::VARCHAR);
@@ -83,6 +90,8 @@ TableFunction RpcStartFunction::GetFunction() {
 	// TODO add a named parameter to specify where the keys are
 	auto fun = TableFunction("rpc_start", {LogicalType::VARCHAR}, RpcStartFun, RpcStartBind);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
+	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
+
 	return fun;
 }
 

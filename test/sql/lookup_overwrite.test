@@ -12,7 +12,7 @@ create table t2 as select range j from range(200);
 
 foreach server 'quack:localhost'
 
-foreach ssl false true
+foreach ssl true
 
 statement ok con1
 call rpc_start({server}, disable_ssl={ssl});

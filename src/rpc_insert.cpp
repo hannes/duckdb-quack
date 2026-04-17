@@ -1,13 +1,11 @@
 #include "rpc_insert.hpp"
 
-#include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/planner/operator/logical_create_table.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/execution/operator/projection/physical_projection.hpp"
 #include "duckdb/execution/operator/scan/physical_table_scan.hpp"
 #include "duckdb/planner/expression/bound_cast_expression.hpp"
-#include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "catalog.hpp"
 #include "message.hpp"
 
@@ -32,7 +30,7 @@ class RpcInsertGlobalState : public GlobalSinkState {
 public:
 	explicit RpcInsertGlobalState(RpcTableCatalogEntry &table_p) : table(table_p), insert_count(0) {
 	}
-	RpcInsertGlobalState(unique_ptr<CatalogEntry> owned_entry_p)
+	explicit RpcInsertGlobalState(unique_ptr<CatalogEntry> owned_entry_p)
 	    : table(owned_entry_p->Cast<RpcTableCatalogEntry>()), owned_entry(std::move(owned_entry_p)), insert_count(0) {
 	}
 
@@ -95,7 +93,7 @@ SourceResultType RpcInsert::GetDataInternal(ExecutionContext &context, DataChunk
                                             OperatorSourceInput &input) const {
 	auto &insert_gstate = sink_state->Cast<RpcInsertGlobalState>();
 	chunk.SetCardinality(1);
-	chunk.SetValue(0, 0, Value::BIGINT(insert_gstate.insert_count));
+	chunk.SetValue(0, 0, Value::BIGINT(NumericCast<int64_t>(insert_gstate.insert_count)));
 	return SourceResultType::FINISHED;
 }
 

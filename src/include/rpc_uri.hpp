@@ -84,6 +84,9 @@ public:
 	bool IPv6() const {
 		return ipv6;
 	}
+	bool IsLocal() const {
+		return StringUtil::Lower(host) == "localhost" || host == "127.0.0.1" || host == "::1";
+	}
 
 private:
 	bool ssl;
