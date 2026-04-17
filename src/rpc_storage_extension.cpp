@@ -2,6 +2,8 @@
 #include "duckdb/main/database.hpp"
 #include "rpc_server.hpp"
 
+#include <thread>
+
 using namespace duckdb;
 
 RpcStorageExtensionInfo &RpcStorageExtensionInfo::GetState(const DatabaseInstance &instance) {
@@ -27,11 +29,20 @@ RpcServer &RpcStorageExtensionInfo::FindOrCreateServer(ClientContext &context, c
 }
 
 bool RpcStorageExtensionInfo::StopServer(ClientContext &context, const RpcUri &listen_uri) {
-	std::lock_guard<std::mutex> lock(servers_mutex);
-	const auto it = servers.find(listen_uri.Uri());
-	if (it == servers.end()) {
-		return false;
+	unique_ptr<RpcServer> to_destroy;
+	{
+		std::lock_guard<std::mutex> lock(servers_mutex);
+		const auto it = servers.find(listen_uri.Uri());
+		if (it == servers.end()) {
+			return false;
+		}
+		to_destroy = std::move(it->second);
+		servers.erase(it);
 	}
-	servers.erase(it);
+	// Destroy off the calling thread so that when rpc_stop is invoked from inside one
+	// of the server's own worker threads (typical: rpc_call(<self>, 'rpc_stop(<self>)')),
+	// ~HttpsRpcServer doesn't end up joining the httplib worker pool that contains the
+	// current thread → pthread_join(self) → EDEADLK → terminate.
+	std::thread([srv = std::move(to_destroy)]() mutable { srv.reset(); }).detach();
 	return true;
 }
