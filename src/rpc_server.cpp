@@ -204,6 +204,9 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 				return make_uniq<ErrorMessage>(query_result->GetError());
 			}
 			rpc_connection->duckdb_query_result = std::move(query_result);
+			// Fresh query → restart batch numbering. Clients' local state is re-initialized on
+			// a new PREPARE, so indices start at 0 again.
+			rpc_connection->next_batch_index = 0;
 		}
 		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames(),
 		                                         GetEstimatedCardinality(*rpc_connection->duckdb_connection->context));
@@ -247,7 +250,8 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 			bytes_est += result_chunk->size() * result_chunk->ColumnCount() * 8;
 			batch.push_back(std::move(result_chunk));
 		}
-		return make_uniq<FetchResponseMessage>(std::move(batch));
+		auto assigned_batch_index = rpc_connection->next_batch_index++;
+		return make_uniq<FetchResponseMessage>(std::move(batch), optional_idx(assigned_batch_index));
 	}
 
 	case MessageType::CATALOG_REQUEST: {

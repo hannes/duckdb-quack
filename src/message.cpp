@@ -157,6 +157,8 @@ void FetchResponseMessage::Serialize(Serializer &serializer) const {
 	serializer.WriteList(252, "chunks", chunks.size(), [&](Serializer::List &list, idx_t i) {
 		list.WriteObject([&](Serializer &inner) { chunks[i]->Serialize(inner); });
 	});
+	// Optional batch_index. Wire-compatible with older peers: absent → treated as "no batch index".
+	serializer.WritePropertyWithDefault<optional_idx>(253, "batch_index", batch_index, optional_idx());
 }
 
 unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
@@ -166,7 +168,8 @@ unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &dese
 		list.ReadObject([&](Deserializer &inner) { chunk->Deserialize(inner); });
 		chunks.push_back(std::move(chunk));
 	});
-	return make_uniq<FetchResponseMessage>(std::move(chunks));
+	auto batch_index = deserializer.ReadPropertyWithExplicitDefault<optional_idx>(253, "batch_index", optional_idx());
+	return make_uniq<FetchResponseMessage>(std::move(chunks), batch_index);
 }
 
 void ErrorMessage::Serialize(Serializer &serializer) const {

@@ -185,6 +185,8 @@ public:
 	FetchResponseMessage() : ProtocolMessage(TYPE) {};
 	explicit FetchResponseMessage(vector<unique_ptr<DataChunk>> chunks_p)
 	    : ProtocolMessage(TYPE), chunks(std::move(chunks_p)) {};
+	FetchResponseMessage(vector<unique_ptr<DataChunk>> chunks_p, optional_idx batch_index_p)
+	    : ProtocolMessage(TYPE), chunks(std::move(chunks_p)), batch_index(batch_index_p) {};
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ProtocolMessage> Deserialize(Deserializer &deserializer);
@@ -195,9 +197,13 @@ public:
 	vector<unique_ptr<DataChunk>> &MutableChunks() {
 		return chunks;
 	}
+	optional_idx BatchIndex() const {
+		return batch_index;
+	}
 
 private:
 	vector<unique_ptr<DataChunk>> chunks;
+	optional_idx batch_index;
 };
 
 // orrr
