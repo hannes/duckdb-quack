@@ -3,8 +3,6 @@
 #include "duckdb/catalog/catalog_entry.hpp"
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 
-#include <sys/socket.h>
-
 using namespace duckdb;
 
 string duckdb::MessageTypeToString(MessageType type) {
