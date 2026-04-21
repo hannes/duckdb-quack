@@ -14,6 +14,8 @@
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/storage/database_size.hpp"
 #include "duckdb/catalog/catalog_entry/table_macro_catalog_entry.hpp"
+#include "duckdb/main/connection.hpp"
+#include "duckdb/main/database.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
 
@@ -138,18 +140,13 @@ const RpcUri &RpcCatalog::GetServerUri() {
 }
 
 unique_ptr<ColumnDataCollection> RpcCatalog::ExecuteCommand(const string &query) {
+	// FIXME this will break with many results!
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	auto response =
 	    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query, true));
 	chunk_collection->Initialize(response->Types());
-	while (true) {
-		auto fetch_response = client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(connection_id));
-		if (!fetch_response || fetch_response->Chunks().empty()) {
-			break;
-		}
-		for (auto &chunk : fetch_response->Chunks()) {
-			chunk_collection->Append(*chunk);
-		}
+	for (auto &chunk : response->MutableChunks()) {
+		chunk_collection->Append(*chunk);
 	}
 	return chunk_collection;
 }
@@ -180,13 +177,14 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 	try {
 		auto bind_response =
 		    rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
-		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), false));
+		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s WHERE false", lookup_info.GetEntryName()),
+		        false));
 		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
 			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
 		}
 		return new RpcTableCatalogEntry(catalog, *this, create_info);
 	} catch (IOException &ex) { // FIXME this should not be a catch on IOError
-		return nullptr;
+		throw new CatalogException(ex.what());
 	}
 }
 

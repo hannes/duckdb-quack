@@ -61,6 +61,12 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
+	bind_data->needs_more_fetch = true;
+	if (bind_response->HasResults()) {
+		bind_data->initial_results = std::move(bind_response->MutableChunks());
+		bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+	}
+
 	return bind_data;
 }
 
@@ -104,6 +110,12 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
+	// new stuff
+	bind_data->needs_more_fetch = true;
+	if (bind_response->HasResults()) {
+		bind_data->initial_results = std::move(bind_response->MutableChunks());
+		bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+	}
 	return bind_data;
 }
 
@@ -242,15 +254,23 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 	if (global_state.done) {
 		return nullptr;
 	}
+
 	auto local_state = make_uniq<RpcLocalState>();
 	// re-use initial client from bind if possible
-	if (bind_data.initial_client) { // TODO possible race here?
+	if (bind_data.initial_client) { // TODO possible race here, too?
 		local_state->client = unique_ptr<RpcClient>(bind_data.initial_client.release());
 	} else {
 		local_state->client = RpcClient::GetClient(bind_data.server_uri);
 		local_state->client->SetContext(&context.client);
 	}
 
+	// TODO we need a lock here
+	if (!bind_data.initial_results.empty()) {
+		for (auto &chunk : bind_data.initial_results) {
+			local_state->pending.push(std::move(chunk));
+		}
+		bind_data.initial_results.clear();
+	}
 	return local_state;
 }
 
@@ -262,7 +282,8 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	// Only issue a new FETCH if we've drained our local batch and the stream
 	// hasn't signalled end. global_state.done is an optimization hint that
 	// skips wasted FETCHes — it must not pre-empt draining local pending.
-	if (local_state.pending.empty() && !local_state.server_exhausted && !global_state.done) {
+	if (local_state.pending.empty() && !local_state.server_exhausted && !global_state.done &&
+	    bind_data.needs_more_fetch) {
 		auto fetch_response =
 		    local_state.client->Request<FetchResponseMessage>(make_uniq<FetchRequestMessage>(bind_data.connection_id));
 		if (fetch_response->Chunks().empty()) {
