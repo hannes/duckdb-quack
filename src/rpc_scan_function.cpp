@@ -50,8 +50,8 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 		token = default_token_val.GetValue<string>();
 	}
 
-	auto connection_request_response = bind_data->initial_client->Request<ConnectionResponseMessage>(
-	    make_uniq<ConnectionRequestMessage>(token));
+	auto connection_request_response =
+	    bind_data->initial_client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(

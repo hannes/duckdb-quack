@@ -139,7 +139,7 @@ static void QuackIdentifyFun(ClientContext &, TableFunctionInput &, DataChunk &)
 }
 
 static unique_ptr<FunctionData> QuackIdentifyBind(ClientContext &ctx, TableFunctionBindInput &input,
-                                                   vector<LogicalType> &return_types, vector<string> &names) {
+                                                  vector<LogicalType> &return_types, vector<string> &names) {
 	auto &config = ClientConfig::GetConfig(ctx);
 	for (auto &kv : input.named_parameters) {
 		if (kv.second.IsNull()) {
@@ -154,11 +154,11 @@ static unique_ptr<FunctionData> QuackIdentifyBind(ClientContext &ctx, TableFunct
 
 static TableFunction GetQuackIdentifyFunction() {
 	TableFunction fun("quack_identify", {}, QuackIdentifyFun, QuackIdentifyBind);
-	fun.named_parameters["name"]     = LogicalType::VARCHAR;
+	fun.named_parameters["name"] = LogicalType::VARCHAR;
 	fun.named_parameters["provider"] = LogicalType::VARCHAR;
 	fun.named_parameters["hostname"] = LogicalType::VARCHAR;
-	fun.named_parameters["region"]   = LogicalType::VARCHAR;
-	fun.named_parameters["meta"]     = LogicalType::VARCHAR; // JSON as string
+	fun.named_parameters["region"] = LogicalType::VARCHAR;
+	fun.named_parameters["meta"] = LogicalType::VARCHAR; // JSON as string
 	return fun;
 }
 
@@ -217,18 +217,15 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// Process-wide fallback anchor for whoami().uptime when whoami_started_at isn't set.
 	// Stored as BIGINT epoch-microseconds to stay TZ-invariant regardless of ICU state.
-	config.AddExtensionOption("quack_loaded_at_us", "Epoch microseconds at extension load",
-	                          LogicalType::BIGINT,
+	config.AddExtensionOption("quack_loaded_at_us", "Epoch microseconds at extension load", LogicalType::BIGINT,
 	                          Value::BIGINT(Timestamp::GetCurrentTimestamp().value));
 
 	// whoami() contract — register the table macro directly via the default-table-macro
 	// machinery so function resolution in the body is deferred to invocation time
 	// (avoids the get_current_timestamp / core_functions chicken-and-egg).
 	static const DefaultTableMacro whoami_macro = {
-	    DEFAULT_SCHEMA,
-	    "whoami",
-	    {nullptr},                    // no positional parameters
-	    {{nullptr, nullptr}},         // no named parameters
+	    DEFAULT_SCHEMA,       "whoami", {nullptr}, // no positional parameters
+	    {{nullptr, nullptr}},                      // no named parameters
 	    R"SQL(SELECT
 		    getvariable('whoami_name')::VARCHAR     AS name,
 		    getvariable('whoami_provider')::VARCHAR AS provider,

@@ -96,8 +96,7 @@ RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, Clien
 		}
 	}
 
-	auto connection_response =
-	    client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
+	auto connection_response = client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
 	connection_id = connection_response->ConnectionId();
 
 	// TODO a tiiny bit clunky this
@@ -169,7 +168,6 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 
 	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
 	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
-
 	auto catalog_type = lookup_info.GetCatalogType();
 	auto &entry_name = lookup_info.GetEntryName();
 	if (catalog_type == CatalogType::TABLE_FUNCTION_ENTRY) {

@@ -165,6 +165,25 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessage(ProtocolMessage &received_m
 	return response;
 }
 
+static vector<unique_ptr<DataChunk>> CreateBatch(unique_ptr<QueryResult> &query_result, idx_t max_chunks) {
+	vector<unique_ptr<DataChunk>> batch;
+	while (batch.size() < max_chunks) {
+		auto result_chunk = query_result->Fetch();
+		// error case
+		if (!result_chunk && query_result->HasError()) {
+			batch.clear();
+			return std::move(batch);
+		}
+		// we are done case
+		if (!result_chunk || result_chunk->size() == 0) {
+			query_result.reset();
+			break;
+		}
+		batch.push_back(std::move(result_chunk));
+	}
+	return std::move(batch);
+}
+
 unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &received_message) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
@@ -197,21 +216,36 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		if (statement->HasError()) {
 			return make_uniq<ErrorMessage>(statement->GetError());
 		}
-		if (prepare_request_message.ImmediatelyExecute()) {
-			vector<Value> params; // TODO allow parameters here?
-			auto query_result = statement->PendingQuery(params, true)->Execute();
-
-			if (query_result->HasError()) {
-				return make_uniq<ErrorMessage>(query_result->GetError());
-			}
-
-			rpc_connection->duckdb_query_result = std::move(query_result);
-			// Fresh query → restart batch numbering. Clients' local state is re-initialized on
-			// a new PREPARE, so indices start at 0 again.
-			rpc_connection->next_batch_index = 0;
+		if (!prepare_request_message.ImmediatelyExecute()) {
+			make_uniq<ErrorMessage>("Not currently supported :/");
 		}
+		vector<Value> params; // TODO allow parameters here?
+		auto query_result = statement->PendingQuery(params, true)->Execute();
+
+		if (query_result->HasError()) {
+			return make_uniq<ErrorMessage>(query_result->GetError());
+		}
+
+		rpc_connection->duckdb_query_result = std::move(query_result);
+		// Fresh query → restart batch numbering. Clients' local state is re-initialized on
+		// a new PREPARE, so indices start at 0 again.
+		rpc_connection->next_batch_index = 0;
+
+		Value max_chunks_val;
+		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
+		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
+
+		auto batch = CreateBatch(rpc_connection->duckdb_query_result, max_chunks_per_batch);
+		if (rpc_connection->duckdb_query_result && rpc_connection->duckdb_query_result->HasError()) {
+			auto error_message = rpc_connection->duckdb_query_result->GetError();
+			rpc_connection->duckdb_query_result.reset();
+			return make_uniq<ErrorMessage>(error_message);
+		}
+		auto needs_more_fetch = batch.size() == max_chunks_per_batch;
+
 		return make_uniq<PrepareResponseMessage>(statement->GetTypes(), statement->GetNames(),
-		                                         GetEstimatedCardinality(*rpc_connection->duckdb_connection->context));
+		                                         GetEstimatedCardinality(*rpc_connection->duckdb_connection->context),
+		                                         std::move(batch), needs_more_fetch);
 	}
 
 	case MessageType::FETCH_REQUEST: {
@@ -233,20 +267,11 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
 
-		vector<unique_ptr<DataChunk>> batch;
-		while (batch.size() < max_chunks_per_batch) {
-			auto result_chunk = rpc_connection->duckdb_query_result->Fetch();
-
-			if (!result_chunk && rpc_connection->duckdb_query_result->HasError()) {
-				auto error = make_uniq<ErrorMessage>(rpc_connection->duckdb_query_result->GetError());
-				rpc_connection->duckdb_query_result.reset();
-				return error;
-			}
-			if (!result_chunk || result_chunk->size() == 0) {
-				rpc_connection->duckdb_query_result.reset();
-				break;
-			}
-			batch.push_back(std::move(result_chunk));
+		auto batch = CreateBatch(rpc_connection->duckdb_query_result, max_chunks_per_batch);
+		if (rpc_connection->duckdb_query_result && rpc_connection->duckdb_query_result->HasError()) {
+			auto error_message = rpc_connection->duckdb_query_result->GetError();
+			rpc_connection->duckdb_query_result.reset();
+			return make_uniq<ErrorMessage>(error_message);
 		}
 		auto assigned_batch_index = rpc_connection->next_batch_index++;
 		return make_uniq<FetchResponseMessage>(std::move(batch), optional_idx(assigned_batch_index));
