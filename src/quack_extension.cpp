@@ -57,7 +57,9 @@ static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_
                                      AttachOptions &attach_options) {
 	auto diable_ssl = attach_options.options.find("disable_ssl") != attach_options.options.end() &&
 	                  attach_options.options["disable_ssl"].GetValue<bool>();
-	return make_uniq<RpcCatalog>(db, RpcUri("quack:" + info.path, !diable_ssl), context);
+	// info.path may or may not already carry the "quack:" prefix.
+	auto uri = StringUtil::StartsWith(info.path, "quack:") ? info.path : "quack:" + info.path;
+	return make_uniq<RpcCatalog>(db, RpcUri(uri, !diable_ssl), context);
 }
 
 static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
