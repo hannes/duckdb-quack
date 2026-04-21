@@ -177,14 +177,13 @@ optional_ptr<CatalogEntry> RpcSchemaCatalogEntry::LookupEntry(CatalogTransaction
 	try {
 		auto bind_response =
 		    rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
-		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s WHERE false", lookup_info.GetEntryName()),
-		        false));
+		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s", lookup_info.GetEntryName()), false));
 		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
 			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
 		}
 		return new RpcTableCatalogEntry(catalog, *this, create_info);
 	} catch (IOException &ex) { // FIXME this should not be a catch on IOError
-		throw new CatalogException(ex.what());
+		return nullptr;
 	}
 }
 

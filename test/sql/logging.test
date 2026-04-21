@@ -4,8 +4,6 @@
 
 require quack
 
-require httpfs
-
 set ignore_error_messages __none__
 
 statement ok
@@ -39,11 +37,11 @@ select count(*) > 0 from duckdb_logs_parsed('RPC') where message_type = 'PREPARE
 ----
 true
 
-# check that FETCH_REQUEST entries exist
+# we no longer need a fetch
 query I con2
 select count(*) > 0 from duckdb_logs_parsed('RPC') where message_type = 'FETCH_REQUEST'
 ----
-true
+false
 
 # check that rpc_connection_id is set on non-connection messages
 query I con2

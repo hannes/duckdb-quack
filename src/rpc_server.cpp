@@ -217,7 +217,9 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 			return make_uniq<ErrorMessage>(statement->GetError());
 		}
 		if (!prepare_request_message.ImmediatelyExecute()) {
-			make_uniq<ErrorMessage>("Not currently supported :/");
+			return make_uniq<PrepareResponseMessage>(
+			    statement->GetTypes(), statement->GetNames(),
+			    GetEstimatedCardinality(*rpc_connection->duckdb_connection->context));
 		}
 		vector<Value> params; // TODO allow parameters here?
 		auto query_result = statement->PendingQuery(params, true)->Execute();

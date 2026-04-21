@@ -231,16 +231,20 @@ static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFuncti
 }
 
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
 
 	// For the catalog path (ATTACH), LookupEntry only prepares without executing
 	// to avoid the server-side result being overwritten by subsequent lookups.
 	// We execute the query here, right before scanning, so the result is fresh.
+
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = RpcClient::GetClient(bind_data.server_uri);
 		client->SetContext(&context);
-		client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
+		auto response_message = client->Request<PrepareResponseMessage>(
+		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
+		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
+		bind_data.initial_results = std::move(response_message->MutableChunks());
 	}
 
 	// FIXME
@@ -337,6 +341,15 @@ static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionG
 	return OperatorPartitionData(idx);
 }
 
+InsertionOrderPreservingMap<string> RpcCallToString(TableFunctionToStringInput &input) {
+	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+	InsertionOrderPreservingMap<string> result;
+	result["Server"] = bind_data.server_uri.Uri();
+	result["Cardinality"] =
+	    bind_data.estimated_cardinality.IsValid() ? to_string(bind_data.estimated_cardinality.GetIndex()) : "?";
+	return result;
+}
+
 TableFunction RpcScanFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                         RpcInitLocal);
@@ -344,6 +357,7 @@ TableFunction RpcScanFunction::GetFunction() {
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.get_partition_data = RpcGetPartitionData;
+	fun.to_string = RpcCallToString;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
@@ -355,6 +369,8 @@ TableFunction RpcScanByNameFunction::GetFunction() {
 	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.get_partition_data = RpcGetPartitionData;
+	fun.to_string = RpcCallToString;
+
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;

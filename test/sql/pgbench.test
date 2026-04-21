@@ -4,8 +4,6 @@
 
 require quack
 
-require httpfs
-
 set ignore_error_messages __none__
 
 
@@ -20,7 +18,6 @@ CREATE TABLE pgbench_history(tid INTEGER, bid INTEGER, aid INTEGER, delta INTEGE
 
 statement ok con1
 CREATE TABLE pgbench_tellers(tid INTEGER, bid INTEGER, tbalance INTEGER, filler VARCHAR);
-
 
 statement ok
 set rpc_default_token='asdf'
