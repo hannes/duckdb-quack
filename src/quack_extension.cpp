@@ -83,13 +83,7 @@ public:
 
 // pass session id
 static void RpcAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
-	D_ASSERT(args.size() == 2);
-	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
-	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR);
-	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
-
 	auto auth_str = args.GetValue(1, 0).GetValue<string>();
-
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(state.GetContext());
 	auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
@@ -97,25 +91,10 @@ static void RpcAuthToken(const DataChunk &args, ExpressionState &state, Vector &
 	D_ASSERT(!default_token_val.IsNull());
 	D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
 	auto default_token = default_token_val.GetValue<string>();
-
 	result.SetValue(0, Value(auth_str == default_token));
 }
 
 static void RpcDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
-	D_ASSERT(args.size() == 2);
-	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR); // session id
-	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::VARCHAR); // query
-	D_ASSERT(result.GetType().id() == LogicalTypeId::BOOLEAN);
-
-	Parser parser;
-	auto q = args.GetValue(1, 0).GetValue<string>();
-	parser.ParseQuery(q);
-	for (auto &statement : parser.statements) {
-		if (statement->TYPE != StatementType::SELECT_STATEMENT) {
-			// TODO
-		}
-	}
-
 	result.SetValue(0, Value(true)); // choose life
 }
 
@@ -176,11 +155,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 	ScalarFunction rpc_auth_token("rpc_auth_token",
 	                              {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
 	                              LogicalType::BOOLEAN, RpcAuthToken);
+	rpc_auth_token.SetVolatile();
 	loader.RegisterFunction(rpc_auth_token);
 
 	ScalarFunction rpc_authorization("rpc_dummy_authorization",
 	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
 	                                 LogicalType::BOOLEAN, RpcDummyAuthorization);
+	rpc_authorization.SetVolatile();
 	loader.RegisterFunction(rpc_authorization);
 
 	ScalarFunction rpc_uri_parser("rpc_uri_parser", {/* uri */ LogicalType::VARCHAR, /* ssl */ LogicalType::BOOLEAN},
