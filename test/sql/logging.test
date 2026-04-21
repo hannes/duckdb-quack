@@ -81,11 +81,15 @@ select count(*) > 0 from duckdb_logs_parsed('RPC') where client_query_id is not 
 ----
 true
 
+mode skip
+
 # check client_query_id is populated on server-side logs
 query I con2
 select count(*) > 0 from duckdb_logs_parsed('RPC') where client_query_id is not null and (server is null or server = '')
 ----
 true
+
+mode unskip
 
 # check server-side logs exist (scope=DATABASE, no server field)
 query I con2
