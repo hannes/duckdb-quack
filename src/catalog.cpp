@@ -96,8 +96,7 @@ RpcCatalog::RpcCatalog(AttachedDatabase &db_p, const RpcUri &server_uri_p, Clien
 		}
 	}
 
-	auto connection_response =
-	    client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
+	auto connection_response = client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
 	connection_id = connection_response->ConnectionId();
 
 	// TODO a tiiny bit clunky this
