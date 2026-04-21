@@ -5,6 +5,7 @@
 #include "duckdb/function/table_function.hpp"
 #include "rpc_bind_data.hpp"
 #include "duckdb/main/database.hpp"
+#include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
@@ -29,17 +30,28 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	bind_data->initial_client = RpcClient::GetClient(bind_data->server_uri);
 	bind_data->initial_client->SetContext(&context);
 
-	Value default_token_val;
-	auto &config = DBConfig::GetConfig(context);
-
-	auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-	D_ASSERT(lookup_result_token);
-	if (default_token_val.IsNull() || default_token_val.type().id() != LogicalTypeId::VARCHAR) {
-		throw InvalidConfigurationException("No RPC token found");
+	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
+	// global rpc_default_token setting. Mirrors the logic in RpcCatalog::RpcCatalog.
+	string token;
+	auto &secret_manager = SecretManager::Get(context);
+	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
+	auto match = secret_manager.LookupSecret(transaction, bind_data->server_uri.Uri(), "quack");
+	if (match.HasMatch()) {
+		const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
+		token = kv.TryGetValue("token", true).ToString();
+	} else {
+		Value default_token_val;
+		auto &config = DBConfig::GetConfig(context);
+		auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
+		D_ASSERT(lookup_result_token);
+		if (default_token_val.IsNull() || default_token_val.type().id() != LogicalTypeId::VARCHAR) {
+			throw InvalidConfigurationException("No RPC token found");
+		}
+		token = default_token_val.GetValue<string>();
 	}
 
 	auto connection_request_response = bind_data->initial_client->Request<ConnectionResponseMessage>(
-	    make_uniq<ConnectionRequestMessage>(default_token_val.GetValue<string>()));
+	    make_uniq<ConnectionRequestMessage>(token));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(
