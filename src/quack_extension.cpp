@@ -140,12 +140,12 @@ static void QuackIdentifyFun(ClientContext &, TableFunctionInput &, DataChunk &)
 
 static unique_ptr<FunctionData> QuackIdentifyBind(ClientContext &ctx, TableFunctionBindInput &input,
                                                   vector<LogicalType> &return_types, vector<string> &names) {
-	auto &config = ClientConfig::GetConfig(ctx);
+	auto &db_config = DBConfig::GetConfig(ctx);
 	for (auto &kv : input.named_parameters) {
 		if (kv.second.IsNull()) {
 			continue;
 		}
-		config.SetUserVariable("whoami_" + kv.first, kv.second);
+		db_config.SetOptionByName("whoami_" + kv.first, kv.second);
 	}
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("ok");
@@ -220,6 +220,17 @@ static void LoadInternal(ExtensionLoader &loader) {
 	config.AddExtensionOption("quack_loaded_at_us", "Epoch microseconds at extension load", LogicalType::BIGINT,
 	                          Value::BIGINT(Timestamp::GetCurrentTimestamp().value));
 
+	// whoami() identity fields — global settings so they propagate across all sessions
+	// (rpc_call creates fresh server-side sessions that wouldn't see per-connection state).
+	config.AddExtensionOption("whoami_name", "Human-readable name for this node", LogicalType::VARCHAR, Value());
+	config.AddExtensionOption("whoami_provider", "Deployment provider (ec2, docker, local, ...)",
+	                          LogicalType::VARCHAR, Value());
+	config.AddExtensionOption("whoami_hostname", "Network hostname / public address", LogicalType::VARCHAR, Value());
+	config.AddExtensionOption("whoami_region", "Deployment region", LogicalType::VARCHAR, Value());
+	config.AddExtensionOption("whoami_started_at", "Node start time (ISO-8601 TIMESTAMP)", LogicalType::VARCHAR,
+	                          Value());
+	config.AddExtensionOption("whoami_meta", "Provider-specific metadata as JSON", LogicalType::VARCHAR, Value("{}"));
+
 	// whoami() contract — register the table macro directly via the default-table-macro
 	// machinery so function resolution in the body is deferred to invocation time
 	// (avoids the get_current_timestamp / core_functions chicken-and-egg).
@@ -227,22 +238,22 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    DEFAULT_SCHEMA,       "whoami", {nullptr}, // no positional parameters
 	    {{nullptr, nullptr}},                      // no named parameters
 	    R"SQL(SELECT
-		    getvariable('whoami_name')::VARCHAR     AS name,
-		    getvariable('whoami_provider')::VARCHAR AS provider,
-		    getvariable('whoami_hostname')::VARCHAR AS hostname,
-		    getvariable('whoami_region')::VARCHAR   AS region,
+		    current_setting('whoami_name')::VARCHAR     AS name,
+		    current_setting('whoami_provider')::VARCHAR AS provider,
+		    current_setting('whoami_hostname')::VARCHAR AS hostname,
+		    current_setting('whoami_region')::VARCHAR   AS region,
 		    to_microseconds(epoch_us(current_timestamp) - COALESCE(
-		      epoch_us(getvariable('whoami_started_at')::TIMESTAMPTZ),
+		      epoch_us(current_setting('whoami_started_at')::TIMESTAMPTZ),
 		      current_setting('quack_loaded_at_us')::BIGINT
-		    ))                             AS uptime,
-		    current_timestamp              AS ts_now,
+		    ))                                          AS uptime,
+		    current_timestamp                           AS ts_now,
 		    json_merge_patch(
 		      json_object(
 		        'duckdb_version', version(),
 		        'platform',       (SELECT platform FROM pragma_platform())
 		      ),
-		      COALESCE(TRY_CAST(getvariable('whoami_meta') AS JSON), '{}'::JSON)
-		    )                              AS meta
+		      COALESCE(TRY_CAST(current_setting('whoami_meta') AS JSON), '{}'::JSON)
+		    )                                           AS meta
 	    )SQL",
 	};
 	auto whoami_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(whoami_macro);
