@@ -19,5 +19,7 @@ struct RpcBindData : FunctionData {
 	vector<LogicalType> column_types;
 	vector<unique_ptr<DataChunk>> initial_results;
 	bool needs_more_fetch;
+	vector<column_t> column_ids;
+	vector<idx_t> projection_ids;
 };
 } // namespace duckdb
