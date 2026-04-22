@@ -8,14 +8,22 @@
 
 using namespace duckdb;
 
-HttpRpcServer::~HttpRpcServer() {
+void HttpRpcServer::Close() {
+	// Stops accepting new connections and joins the listener threads (NOT the
+	// httplib worker pool)
 	server->stop();
 	try {
 		for (auto &thread : listen_threads) {
-			thread.join();
+			if (thread.joinable()) {
+				thread.join();
+			}
 		}
 	} catch (std::exception &) {
 	}
+}
+
+HttpRpcServer::~HttpRpcServer() {
+	Close();
 }
 
 void HttpRpcServer::ListenThread(HttpRpcServer *rpc_server, const string &listen_host, int listen_port) {
