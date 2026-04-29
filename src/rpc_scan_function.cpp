@@ -317,7 +317,9 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 
 	auto chunk = std::move(local_state.pending.front());
 	local_state.pending.pop();
-
+	if (!chunk) { // somehow this can happen
+		return;
+	}
 	auto &response_chunk = *chunk;
 	const auto &col_ids = bind_data.column_ids;
 	const auto &proj_ids = bind_data.projection_ids;
