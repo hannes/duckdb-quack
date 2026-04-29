@@ -79,17 +79,17 @@ true
 # --- whoami_started_at override changes uptime ---
 
 statement ok
-SET VARIABLE whoami_started_at = TIMESTAMP '2020-01-01 00:00:00';
+SET whoami_started_at = '2020-01-01 00:00:00';
 
 query I
 SELECT uptime > INTERVAL 365 DAY FROM whoami();
 ----
 true
 
-# --- direct SET VARIABLE also works (quack_identify is sugar, not gatekeeper) ---
+# --- direct SET also works (quack_identify is sugar, not gatekeeper) ---
 
 statement ok
-SET VARIABLE whoami_name = 'hand-set';
+SET whoami_name = 'hand-set';
 
 query I
 SELECT name FROM whoami();

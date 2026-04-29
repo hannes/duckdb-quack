@@ -203,13 +203,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// whoami() identity fields — global settings so they propagate across all sessions
 	// (rpc_call creates fresh server-side sessions that wouldn't see per-connection state).
-	config.AddExtensionOption("whoami_name", "Human-readable name for this node", LogicalType::VARCHAR, Value());
+	config.AddExtensionOption("whoami_name", "Human-readable name for this node", LogicalType::VARCHAR, Value(""));
 	config.AddExtensionOption("whoami_provider", "Deployment provider (ec2, docker, local, ...)", LogicalType::VARCHAR,
-	                          Value());
-	config.AddExtensionOption("whoami_hostname", "Network hostname / public address", LogicalType::VARCHAR, Value());
-	config.AddExtensionOption("whoami_region", "Deployment region", LogicalType::VARCHAR, Value());
+	                          Value(""));
+	config.AddExtensionOption("whoami_hostname", "Network hostname / public address", LogicalType::VARCHAR, Value(""));
+	config.AddExtensionOption("whoami_region", "Deployment region", LogicalType::VARCHAR, Value(""));
 	config.AddExtensionOption("whoami_started_at", "Node start time (ISO-8601 TIMESTAMP)", LogicalType::VARCHAR,
-	                          Value());
+	                          Value(""));
 	config.AddExtensionOption("whoami_meta", "Provider-specific metadata as JSON", LogicalType::VARCHAR, Value("{}"));
 
 	// whoami() contract — register the table macro directly via the default-table-macro
@@ -219,14 +219,14 @@ static void LoadInternal(ExtensionLoader &loader) {
 	    DEFAULT_SCHEMA,       "whoami", {nullptr}, // no positional parameters
 	    {{nullptr, nullptr}},                      // no named parameters
 	    R"SQL(SELECT
-		    current_setting('whoami_name')::VARCHAR     AS name,
-		    current_setting('whoami_provider')::VARCHAR AS provider,
-		    current_setting('whoami_hostname')::VARCHAR AS hostname,
-		    current_setting('whoami_region')::VARCHAR   AS region,
+		    NULLIF(current_setting('whoami_name'), '')::VARCHAR     AS name,
+		    NULLIF(current_setting('whoami_provider'), '')::VARCHAR AS provider,
+		    NULLIF(current_setting('whoami_hostname'), '')::VARCHAR AS hostname,
+		    NULLIF(current_setting('whoami_region'), '')::VARCHAR   AS region,
 		    to_microseconds(epoch_us(current_timestamp) - COALESCE(
-		      epoch_us(current_setting('whoami_started_at')::TIMESTAMPTZ),
+		      epoch_us(NULLIF(current_setting('whoami_started_at'), '')::TIMESTAMPTZ),
 		      current_setting('quack_loaded_at_us')::BIGINT
-		    ))                                          AS uptime,
+		    ))                                                      AS uptime,
 		    current_timestamp                           AS ts_now,
 		    json_merge_patch(
 		      json_object(

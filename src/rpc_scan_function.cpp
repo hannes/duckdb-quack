@@ -233,6 +233,9 @@ static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFuncti
 unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
 	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
 
+	bind_data.column_ids = input.column_ids;
+	bind_data.projection_ids = input.projection_ids;
+
 	// For the catalog path (ATTACH), LookupEntry only prepares without executing
 	// to avoid the server-side result being overwritten by subsequent lookups.
 	// We execute the query here, right before scanning, so the result is fresh.
@@ -312,13 +315,27 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	local_state.pending.pop();
 
 	auto &response_chunk = *chunk;
-	if (response_chunk.ColumnCount() == output.ColumnCount()) {
+	const auto &col_ids = bind_data.column_ids;
+	const auto &proj_ids = bind_data.projection_ids;
+	if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
 		output.Reference(response_chunk);
 	} else {
-		// Server returned more columns than needed (e.g. rpc_call with projection pushdown).
-		// Copy only the columns DuckDB expects.
+		// Map each output column to the right response column. DuckDB's pushdown contract:
+		//   - column_ids lists which source columns the scan should read (in that order).
+		//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
+		// The server ignores pushdown and returns every column, so we apply both hops here.
 		for (idx_t i = 0; i < output.ColumnCount(); i++) {
-			output.data[i].Reference(response_chunk.data[i]);
+			idx_t src;
+			if (!proj_ids.empty()) {
+				src = col_ids[proj_ids[i]];
+			} else if (!col_ids.empty()) {
+				src = col_ids[i];
+			} else {
+				src = i;
+			}
+			D_ASSERT(src < response_chunk.ColumnCount());
+			D_ASSERT(response_chunk.data[src].GetType() == output.data[i].GetType());
+			output.data[i].Reference(response_chunk.data[src]);
 		}
 	}
 	output.SetCardinality(response_chunk.size());
