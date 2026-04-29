@@ -102,18 +102,15 @@ class PrepareResponseMessage : public ProtocolMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::PREPARE_RESPONSE;
 	// old
-	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
-	                       optional_idx estimated_cardinality_p)
-	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p),
-	      estimated_cardinality(estimated_cardinality_p), has_results(false), needs_more_fetch(true) {};
+	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p)
+	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p), has_results(false),
+	      needs_more_fetch(true) {};
 
 	// new
 	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
-	                       optional_idx estimated_cardinality_p, vector<unique_ptr<DataChunk>> chunks_p,
-	                       bool needs_more_fetch_p)
-	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p),
-	      estimated_cardinality(estimated_cardinality_p), has_results(true), chunks(std::move(chunks_p)),
-	      needs_more_fetch(needs_more_fetch_p) {};
+	                       vector<unique_ptr<DataChunk>> chunks_p, bool needs_more_fetch_p)
+	    : ProtocolMessage(TYPE), result_types(types_p), result_names(names_p), has_results(true),
+	      chunks(std::move(chunks_p)), needs_more_fetch(needs_more_fetch_p) {};
 
 	const vector<LogicalType> &Types() const {
 		return result_types;
@@ -121,9 +118,6 @@ public:
 
 	const vector<string> &Names() const {
 		return result_names;
-	}
-	optional_idx EstimatedCardinality() const {
-		return estimated_cardinality;
 	}
 
 	const vector<unique_ptr<DataChunk>> &Chunks() const {
@@ -145,7 +139,6 @@ public:
 private:
 	vector<LogicalType> result_types;
 	vector<string> result_names;
-	optional_idx estimated_cardinality;
 
 	bool has_results; // this is to flag the new message format, should never need to be accessed
 	bool needs_more_fetch;

@@ -128,7 +128,6 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	ProtocolMessage::Serialize(serializer);
 	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
 	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
-	serializer.WriteProperty<optional_idx>(212, "estimated_cardinality", estimated_cardinality);
 	serializer.WriteProperty<bool>(213, "has_results", has_results);
 	if (has_results) {
 		serializer.WriteList(214, "chunks", chunks.size(), [&](Serializer::List &list, idx_t i) {
@@ -141,12 +140,10 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result_types = deserializer.ReadProperty<vector<LogicalType>>(210, "result_types");
 	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
-	auto estimated_cardinality = deserializer.ReadProperty<optional_idx>(212, "estimated_cardinality");
 
 	auto has_results = deserializer.ReadPropertyWithExplicitDefault<bool>(213, "has_results", false);
 	if (!has_results) {
-		return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names),
-		                                         estimated_cardinality);
+		return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names));
 	}
 
 	vector<unique_ptr<DataChunk>> chunks;
@@ -156,8 +153,8 @@ unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &de
 		chunks.push_back(std::move(chunk));
 	});
 	auto needs_more_fetch = deserializer.ReadProperty<bool>(215, "needs_more_fetch");
-	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names), estimated_cardinality,
-	                                         std::move(chunks), needs_more_fetch);
+	return make_uniq<PrepareResponseMessage>(std::move(result_types), std::move(result_names), std::move(chunks),
+	                                         needs_more_fetch);
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {

@@ -63,7 +63,6 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
-	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
@@ -112,7 +111,6 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	auto bind_response = rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
-	bind_data->estimated_cardinality = bind_response->EstimatedCardinality();
 	return_types = bind_response->Types();
 	names = bind_response->Names();
 
@@ -256,8 +254,8 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 		bind_data.initial_results = std::move(response_message->MutableChunks());
 	}
 
-	// FIXME
-	return make_uniq<RpcGlobalState>(1);
+	// we only multithread if there is more to fetch
+	return make_uniq<RpcGlobalState>(bind_data.needs_more_fetch ? GlobalTableFunctionState::MAX_THREADS : 1);
 }
 
 unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
@@ -347,14 +345,6 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	output.SetCardinality(response_chunk.size());
 }
 
-static unique_ptr<NodeStatistics> RpcCardinality(ClientContext &context, const FunctionData *bind_data_p) {
-	auto &bind_data = bind_data_p->Cast<RpcBindData>();
-	if (bind_data.estimated_cardinality.IsValid()) {
-		return make_uniq<NodeStatistics>(bind_data.estimated_cardinality.GetIndex());
-	}
-	return nullptr;
-}
-
 static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
 	auto &local_state = input.local_state->Cast<RpcLocalState>();
 	// If we haven't received a batch yet, fall back to 0 so downstream doesn't choke; the
@@ -368,8 +358,6 @@ InsertionOrderPreservingMap<string> RpcCallToString(TableFunctionToStringInput &
 	auto &bind_data = input.bind_data->Cast<RpcBindData>();
 	InsertionOrderPreservingMap<string> result;
 	result["Server"] = bind_data.server_uri.Uri();
-	result["Cardinality"] =
-	    bind_data.estimated_cardinality.IsValid() ? to_string(bind_data.estimated_cardinality.GetIndex()) : "?";
 	return result;
 }
 
@@ -377,7 +365,6 @@ TableFunction RpcScanFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
 	                         RpcInitLocal);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
-	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.get_partition_data = RpcGetPartitionData;
 	fun.to_string = RpcCallToString;
@@ -389,7 +376,6 @@ TableFunction RpcScanFunction::GetFunction() {
 TableFunction RpcScanByNameFunction::GetFunction() {
 	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan,
 	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
-	fun.cardinality = RpcCardinality;
 	fun.projection_pushdown = true;
 	fun.get_partition_data = RpcGetPartitionData;
 	fun.to_string = RpcCallToString;

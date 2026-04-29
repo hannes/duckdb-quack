@@ -13,7 +13,6 @@ struct RpcBindData : FunctionData {
 	string connection_id;
 	RpcUri server_uri;
 	string table_name;
-	optional_idx estimated_cardinality;
 	unique_ptr<RpcClient> initial_client;
 	vector<string> column_names;
 	vector<LogicalType> column_types;

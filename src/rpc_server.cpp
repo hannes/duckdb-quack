@@ -40,36 +40,8 @@ string RpcServer::CreateNewConnection(const string &session_id) {
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
 	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
 	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
-
-	auto &client_config = ClientConfig::GetConfig(*new_connection->duckdb_connection->context);
-	client_config.enable_profiler = true;
-	client_config.profiling_coverage = ProfilingCoverage::SELECT;
-	client_config.emit_profiler_output = false;
-	client_config.profiler_settings = {
-	    MetricType::EXTRA_INFO}; // 'EXTRA_INFO' means return estimated cardinality (among other things)
-
 	active_connections[session_id] = std::move(new_connection);
 	return session_id;
-}
-
-// try to get an estimated cardinality from the profiler, orrr
-static optional_idx GetEstimatedCardinality(ClientContext &context) {
-	optional_idx estimated_cardinality = optional_idx::Invalid();
-	auto &profiler = QueryProfiler::Get(context);
-	if (profiler.GetRoot() && profiler.GetRoot()->children.size() == 1 && profiler.GetRoot()->children[0]) {
-		auto &profiler_info = profiler.GetRoot()->children[0]->GetProfilingInfo();
-		if (profiler_info.Enabled(profiler_info.settings, MetricType::EXTRA_INFO)) {
-			auto extra_info_map =
-			    profiler_info.GetMetricValue<InsertionOrderPreservingMap<string>>(MetricType::EXTRA_INFO);
-			if (extra_info_map.contains(RenderTreeNode::ESTIMATED_CARDINALITY)) {
-				estimated_cardinality = stoll(extra_info_map[RenderTreeNode::ESTIMATED_CARDINALITY]);
-			}
-		}
-	}
-	if (estimated_cardinality == 0) {
-		estimated_cardinality = optional_idx::Invalid();
-	}
-	return estimated_cardinality;
 }
 
 static string GetSettingString(DatabaseInstance &db, const string &setting_name) {
@@ -247,7 +219,7 @@ unique_ptr<ProtocolMessage> RpcServer::HandleMessageInternal(ProtocolMessage &re
 		auto needs_more_fetch = batch.size() == max_chunks_per_batch;
 
 		return make_uniq<PrepareResponseMessage>(types, names,
-		                                         GetEstimatedCardinality(*rpc_connection->duckdb_connection->context),
+
 		                                         std::move(batch), needs_more_fetch);
 	}
 
