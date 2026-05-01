@@ -30,10 +30,6 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	lock_guard<mutex> guard(request_mutex);
 
 	auto &db = *context->db;
-	ExtensionHelper::AutoLoadExtension(db, "httpfs");
-	if (!db.ExtensionIsLoaded("httpfs")) {
-		throw MissingExtensionException("The rpc extension requires the httpfs extension to be loaded!");
-	}
 
 	auto &http_util = HTTPUtil::Get(db);
 	auto request_url = uri.Http() + "/rpc";
