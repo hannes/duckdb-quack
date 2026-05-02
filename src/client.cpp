@@ -36,7 +36,7 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	}
 
 	auto &http_util = HTTPUtil::Get(db);
-	auto request_url = uri.Http() + "/rpc";
+	auto request_url = uri.Http() + "/quack";
 	if (!http_params) {
 		http_params = http_util.InitializeParameters(*context, request_url);
 	}

@@ -51,14 +51,14 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 
 	// TODO: this is very liberal, and there might be reasonable cases to restrict to trusted domains (note, this is
 	// only relevant from within a Web browser, since other actors can just ignore the CORS convention
-	server->Options("/rpc", [](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
+	server->Options("/quack", [](const duckdb_httplib::Request &, duckdb_httplib::Response &res) {
 		res.set_header("Access-Control-Allow-Origin", "*");
 		res.set_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
 		res.set_header("Access-Control-Allow-Headers", "*");
 		res.status = 204;
 	});
 
-	server->Post("/rpc", [&](const duckdb_httplib::Request &, duckdb_httplib::Response &res,
+	server->Post("/quack", [&](const duckdb_httplib::Request &, duckdb_httplib::Response &res,
 	                         const duckdb_httplib::ContentReader &content_reader) {
 		res.set_header("Access-Control-Allow-Origin", "*");
 		MemoryStream stream;

@@ -139,9 +139,9 @@ select count(*) > 0 from duckdb_logs_parsed('HTTP') where response.status = 'OK_
 ----
 true
 
-# check URL contains /rpc
+# check URL contains /quack
 query I con2
-select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.url like '%/rpc'
+select count(*) > 0 from duckdb_logs_parsed('HTTP') where request.url like '%/quack'
 ----
 true
 
