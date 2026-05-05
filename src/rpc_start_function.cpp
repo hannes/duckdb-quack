@@ -58,7 +58,7 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 		return;
 	}
 
-	RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_uri);
+	auto &server = RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_uri);
 	output.SetValue(0, 0, bind_data.listen_uri.Uri());
 	output.SetValue(1, 0, bind_data.listen_uri.Http());
 
@@ -70,7 +70,7 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 		// TODO there could be a race condition here, lock this
 		auto lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
 		if (default_token_val.IsNull()) {
-			config.SetOptionByName("rpc_default_token", Value(RpcServer::GenerateSessionId()));
+			config.SetOptionByName("rpc_default_token", Value(server.GenerateSessionId()));
 		}
 
 		lookup_result_token = config.TryGetCurrentSetting("rpc_default_token", default_token_val);

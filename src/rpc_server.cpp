@@ -13,6 +13,7 @@
 #include "duckdb/main/database.hpp"
 
 #include "duckdb/common/types/blob.hpp"
+#include "duckdb/common/encryption_state.hpp"
 
 using namespace duckdb;
 
@@ -71,7 +72,27 @@ static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... v
 }
 
 string RpcServer::GenerateSessionId() {
-	return StringUtil::GenerateRandomName(32);
+	constexpr idx_t kSessionIdBytes = 16; // 128 bits
+
+	{
+		std::lock_guard<std::mutex> lock(session_id_rng_mutex);
+		if (!session_id_rng) {
+			auto encryption_util = db->GetEncryptionUtil(false);
+			auto metadata = make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kSessionIdBytes,
+			                                                   EncryptionTypes::EncryptionVersion::NONE);
+			session_id_rng = encryption_util->CreateEncryptionState(std::move(metadata));
+		}
+	}
+
+	data_t bytes[kSessionIdBytes];
+	session_id_rng->GenerateRandomData(bytes, kSessionIdBytes);
+
+	string result(kSessionIdBytes * 2, '\0');
+	for (idx_t i = 0; i < kSessionIdBytes; i++) {
+		result[2 * i] = Blob::HEX_TABLE[bytes[i] >> 4];
+		result[2 * i + 1] = Blob::HEX_TABLE[bytes[i] & 0x0F];
+	}
+	return result;
 }
 
 // Extract connection_id from a message if available

@@ -17,6 +17,7 @@ class MemoryStream;
 class QueryResult;
 class DatabaseInstance;
 class PreparedStatement;
+class EncryptionState;
 
 struct RpcConnection {
 	mutex lock;
@@ -40,7 +41,7 @@ public:
 	string CreateNewConnection(const string &session_id);
 	// TODO need something to destroy connections
 
-	static string GenerateSessionId();
+	string GenerateSessionId();
 
 	virtual ~RpcServer();
 
@@ -54,6 +55,9 @@ protected:
 	shared_ptr<DatabaseInstance> db;
 	mutex active_connections_mutex;
 	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
+
+	mutex session_id_rng_mutex;
+	shared_ptr<EncryptionState> session_id_rng;
 };
 
 class HttpRpcServer : public RpcServer {
