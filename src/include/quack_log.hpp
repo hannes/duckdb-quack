@@ -7,7 +7,7 @@ namespace duckdb {
 
 class QuackLogType : public LogType {
 public:
-	static constexpr const char *NAME = "RPC";
+	static constexpr const char *NAME = "Quack";
 	static constexpr LogLevel LEVEL = LogLevel::LOG_DEBUG;
 
 	QuackLogType();

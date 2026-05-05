@@ -32,7 +32,7 @@ attach 'quack:localhost' as rpc
 
 
 statement ok con2
-CALL enable_logging('RPC');
+CALL enable_logging('Quack');
 
 
 loop i 0 10
@@ -50,7 +50,7 @@ endloop
 
 # we send 100 times 7 queries, so 700 messages
 query I con2
-select count(*) from duckdb_logs where type = 'RPC' and scope = 'CONNECTION'
+select count(*) from duckdb_logs where type = 'Quack' and scope = 'CONNECTION'
 ----
 30
 

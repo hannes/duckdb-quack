@@ -12,12 +12,9 @@ foreach server 'quack:localhost'
 
 
 statement ok con1
-call quack_serve({server}, token='asdf');
+call quack_serve({server});
 
 sleep 100 millisecond
-
-statement ok con2
-create secret quack_ok (type quack, token 'asdf', scope 'quack:localhost')
 
 
 query I con2

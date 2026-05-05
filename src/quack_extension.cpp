@@ -139,6 +139,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          LogicalType::VARCHAR, Value("quack_check_token"));
 	config.AddExtensionOption("quack_authorization_function", "Name of a callback function for authorization",
 	                          LogicalType::VARCHAR, Value("quack_nop_authorization"));
+
+	// TODO make this readonly from SQL?
+	config.AddExtensionOption("rpc_default_token", "Authorization token used by default", LogicalType::VARCHAR, Value(),
+	                          nullptr, SetScope::GLOBAL);
+
 	config.AddExtensionOption("quack_fetch_batch_chunks", "Maximum number of DataChunks returned per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));
 
