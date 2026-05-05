@@ -44,7 +44,7 @@ bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUr
 	// connect() after rpc_stop observe a real refusal rather than a stale socket.
 	to_destroy->Close();
 	// Full destruction (httplib worker-pool join) runs off-thread so that when
-	// rpc_stop is invoked from inside one of the server's own worker threads
+	// quack_stop is invoked from inside one of the server's own worker threads
 	std::thread([srv = std::move(to_destroy)]() mutable { srv.reset(); }).detach();
 	return true;
 }

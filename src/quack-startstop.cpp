@@ -111,8 +111,8 @@ static void QuackStop(ClientContext &context, TableFunctionInput &data_p, DataCh
 	if (bind_data.finished) {
 		return;
 	}
-	auto &rpc_state = QuackStorageExtensionInfo::GetState(*context.db);
-	if (rpc_state.StopServer(context, bind_data.listen_uri)) {
+	auto &state = QuackStorageExtensionInfo::GetState(*context.db);
+	if (state.StopServer(context, bind_data.listen_uri)) {
 		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_uri.Uri()));
 	} else {
 		output.data[0].SetValue(0, StringUtil::Format("No server found listening on %s", bind_data.listen_uri.Uri()));

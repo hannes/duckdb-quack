@@ -16,7 +16,7 @@ class QuackClient;
 
 class QuackTransaction : public Transaction {
 public:
-	QuackTransaction(QuackCatalog &rpc_catalog_p, TransactionManager &manager_p, ClientContext &context_p);
+	QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p, ClientContext &context_p);
 	~QuackTransaction() override;
 	// TODO
 	void Start();
@@ -30,7 +30,7 @@ public:
 	static QuackTransaction &Get(ClientContext &context, Catalog &catalog);
 
 private:
-	QuackCatalog &rpc_catalog;
+	QuackCatalog &quack_catalog;
 	case_insensitive_map_t<unique_ptr<CatalogEntry>> catalog_entries;
 };
 
@@ -45,7 +45,7 @@ public:
 	void Checkpoint(ClientContext &context, bool force = false) override;
 
 private:
-	QuackCatalog &rpc_catalog;
+	QuackCatalog &quack_catalog;
 	mutex transaction_lock;
 	reference_map_t<Transaction, unique_ptr<QuackTransaction>> transactions;
 };

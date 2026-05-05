@@ -71,8 +71,8 @@ static unique_ptr<Catalog> QuackAttach(optional_ptr<StorageExtensionInfo> storag
 
 static unique_ptr<TransactionManager> QuackCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
                                                                     AttachedDatabase &db, Catalog &catalog) {
-	auto &rpc_catalog = catalog.Cast<QuackCatalog>();
-	return make_uniq<QuackTransactionManager>(db, rpc_catalog);
+	auto &quack_catalog = catalog.Cast<QuackCatalog>();
+	return make_uniq<QuackTransactionManager>(db, quack_catalog);
 }
 
 class QuackStorageExtension : public StorageExtension {

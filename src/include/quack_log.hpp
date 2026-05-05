@@ -13,7 +13,7 @@ public:
 	QuackLogType();
 
 	static LogicalType GetLogType();
-	static string ConstructLogMessage(MessageType request_type, const string &rpc_connection_id,
+	static string ConstructLogMessage(MessageType request_type, const string &connection_id,
 	                                  optional_idx client_query_id, const string &query, const string &server_uri,
 	                                  int64_t duration_ms, MessageType response_type, const string &error);
 };

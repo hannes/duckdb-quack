@@ -21,20 +21,21 @@
 
 using namespace duckdb;
 
-QuackTransaction::QuackTransaction(QuackCatalog &rpc_catalog_p, TransactionManager &manager_p, ClientContext &context_p)
-    : Transaction(manager_p, context_p), rpc_catalog(rpc_catalog_p) {
+QuackTransaction::QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p,
+                                   ClientContext &context_p)
+    : Transaction(manager_p, context_p), quack_catalog(quack_catalog_p) {
 }
 
 void QuackTransaction::Start() {
-	rpc_catalog.ExecuteCommand("BEGIN TRANSACTION");
+	quack_catalog.ExecuteCommand("BEGIN TRANSACTION");
 }
 
 void QuackTransaction::Commit() {
-	rpc_catalog.ExecuteCommand("COMMIT");
+	quack_catalog.ExecuteCommand("COMMIT");
 }
 
 void QuackTransaction::Rollback() {
-	rpc_catalog.ExecuteCommand("ROLLBACK");
+	quack_catalog.ExecuteCommand("ROLLBACK");
 }
 
 QuackTransaction &QuackTransaction::Get(ClientContext &context, Catalog &catalog) {
@@ -44,12 +45,12 @@ QuackTransaction &QuackTransaction::Get(ClientContext &context, Catalog &catalog
 QuackTransaction::~QuackTransaction() {
 }
 
-QuackTransactionManager::QuackTransactionManager(AttachedDatabase &db_p, QuackCatalog &rpc_catalog_p)
-    : TransactionManager(db_p), rpc_catalog(rpc_catalog_p) {
+QuackTransactionManager::QuackTransactionManager(AttachedDatabase &db_p, QuackCatalog &quack_catalog_p)
+    : TransactionManager(db_p), quack_catalog(quack_catalog_p) {
 }
 
 Transaction &QuackTransactionManager::StartTransaction(ClientContext &context) {
-	auto transaction = make_uniq<QuackTransaction>(rpc_catalog, *this, context);
+	auto transaction = make_uniq<QuackTransaction>(quack_catalog, *this, context);
 	transaction->Start();
 	auto &result = *transaction;
 	lock_guard<mutex> l(transaction_lock);
@@ -57,16 +58,16 @@ Transaction &QuackTransactionManager::StartTransaction(ClientContext &context) {
 	return result;
 }
 ErrorData QuackTransactionManager::CommitTransaction(ClientContext &context, Transaction &transaction) {
-	auto &rpc_transaction = transaction.Cast<QuackTransaction>();
-	rpc_transaction.Commit();
+	auto &quack_transaction = transaction.Cast<QuackTransaction>();
+	quack_transaction.Commit();
 	lock_guard<mutex> l(transaction_lock);
 	transactions.erase(transaction);
 	return ErrorData();
 }
 
 void QuackTransactionManager::RollbackTransaction(Transaction &transaction) {
-	auto &rpc_transaction = transaction.Cast<QuackTransaction>();
-	rpc_transaction.Rollback();
+	auto &quack_transaction = transaction.Cast<QuackTransaction>();
+	quack_transaction.Rollback();
 	lock_guard<mutex> l(transaction_lock);
 	transactions.erase(transaction);
 }
@@ -162,7 +163,7 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LookupEntry(CatalogTransacti
 	auto &schema_create_info = GetInfo()->Cast<QuackSchemaInfo>();
 
 	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
-	auto &rpc_catalog = catalog.Cast<QuackCatalog>();
+	auto &quack_catalog = catalog.Cast<QuackCatalog>();
 	auto catalog_type = lookup_info.GetCatalogType();
 	auto &entry_name = lookup_info.GetEntryName();
 	if (catalog_type == CatalogType::TABLE_FUNCTION_ENTRY) {
@@ -174,8 +175,8 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LookupEntry(CatalogTransacti
 
 	try {
 		auto bind_response =
-		    rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
-		        rpc_catalog.GetConnectionId(), StringUtil::Format("FROM %s WHERE FALSE", lookup_info.GetEntryName()),
+		    quack_catalog.GetRawClient().Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(
+		        quack_catalog.GetConnectionId(), StringUtil::Format("FROM %s WHERE FALSE", lookup_info.GetEntryName()),
 		        true));
 		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
 			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
@@ -187,10 +188,10 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LookupEntry(CatalogTransacti
 }
 
 TableFunction QuackTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
-	auto &rpc_catalog = catalog.Cast<QuackCatalog>();
+	auto &quack_catalog = catalog.Cast<QuackCatalog>();
 	auto bind_data = make_uniq<QuackScanBindData>();
-	bind_data->server_uri = rpc_catalog.GetServerUri();
-	bind_data->connection_id = rpc_catalog.GetConnectionId();
+	bind_data->server_uri = quack_catalog.GetServerUri();
+	bind_data->connection_id = quack_catalog.GetConnectionId();
 	bind_data->table_name = name;
 	for (auto &col : GetColumns().Physical()) {
 		bind_data->column_names.push_back(col.Name());
@@ -266,16 +267,16 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateFunction(CatalogTransa
 
 optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateTable(CatalogTransaction transaction,
                                                                 BoundCreateTableInfo &info) {
-	auto &rpc_catalog = catalog.Cast<QuackCatalog>();
+	auto &quack_catalog = catalog.Cast<QuackCatalog>();
 
 	auto create_table_info = info.Base().Copy();
 	create_table_info->catalog = GetInfo()->catalog;
 	create_table_info->schema = GetInfo()->schema;
 
 	auto catalog_request_message =
-	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
+	    make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(create_table_info));
 	auto catalog_response =
-	    rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
+	    quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 	return make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(
 	    catalog, *this, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
 }
@@ -309,15 +310,15 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateType(CatalogTransactio
 }
 
 void QuackSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p) {
-	auto &rpc_catalog = catalog.Cast<QuackCatalog>();
+	auto &quack_catalog = catalog.Cast<QuackCatalog>();
 	auto drop_info = info_p.Copy();
 	drop_info->catalog = GetInfo()->catalog;
 	drop_info->schema = GetInfo()->schema;
 
 	auto catalog_request_message =
-	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(drop_info));
+	    make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(drop_info));
 
-	rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
+	quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 }
 void QuackSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	throw NotImplementedException("Alter not implemented yet, Alter!");
@@ -332,7 +333,7 @@ TableStorageInfo QuackTableCatalogEntry::GetStorageInfo(ClientContext &context) 
 }
 
 // clang-format off
-static const DefaultTableMacro rpc_table_macros[] = {
+static const DefaultTableMacro quack_table_macros[] = {
 	{DEFAULT_SCHEMA, "call", {"remote_sql_query", nullptr}, {{nullptr, nullptr}},  "FROM rpc_call_by_name({CATALOG}, remote_sql_query)"},
 	{nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };
@@ -358,9 +359,9 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::TryLoadBuiltInFunction(const
 	if (entry != default_function_map.end()) {
 		return entry->second.get();
 	}
-	for (idx_t index = 0; rpc_table_macros[index].name != nullptr; index++) {
-		if (StringUtil::CIEquals(rpc_table_macros[index].name, entry_name)) {
-			return LoadBuiltInFunction(rpc_table_macros[index]);
+	for (idx_t index = 0; quack_table_macros[index].name != nullptr; index++) {
+		if (StringUtil::CIEquals(quack_table_macros[index].name, entry_name)) {
+			return LoadBuiltInFunction(quack_table_macros[index]);
 		}
 	}
 	return nullptr;

@@ -26,11 +26,11 @@ HttpQuackServer::~HttpQuackServer() {
 	Close();
 }
 
-void HttpQuackServer::ListenThread(HttpQuackServer *rpc_server, const string &listen_host, int listen_port) {
-	D_ASSERT(rpc_server);
-	D_ASSERT(rpc_server->server);
+void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
+	D_ASSERT(connection_id);
+	D_ASSERT(server->server);
 	D_ASSERT(listen_port > 1 && listen_port < 65535);
-	rpc_server->server->listen(listen_host, listen_port);
+	server->server->listen(listen_host, listen_port);
 }
 
 void HttpQuackServer::Listen(const QuackUri &uri) {

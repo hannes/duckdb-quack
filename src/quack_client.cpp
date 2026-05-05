@@ -64,24 +64,24 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(unique_ptr<QuackMessa
 		                       .count();
 
 		auto request_type = request_message->Type();
-		string rpc_connection_id;
+		string connection_id;
 		string query;
 		optional_idx client_query_id;
 		switch (request_type) {
 		case MessageType::PREPARE_REQUEST: {
 			auto &msg = request_message->Cast<PrepareRequestMessage>();
-			rpc_connection_id = msg.ConnectionId();
+			connection_id = msg.ConnectionId();
 			query = msg.Query();
 			break;
 		}
 		case MessageType::FETCH_REQUEST:
-			rpc_connection_id = request_message->Cast<FetchRequestMessage>().ConnectionId();
+			connection_id = request_message->Cast<FetchRequestMessage>().ConnectionId();
 			break;
 		case MessageType::CATALOG_REQUEST:
-			rpc_connection_id = request_message->Cast<CatalogRequestMessage>().ConnectionId();
+			connection_id = request_message->Cast<CatalogRequestMessage>().ConnectionId();
 			break;
 		case MessageType::APPEND_REQUEST:
-			rpc_connection_id = request_message->Cast<AppendRequestMessage>().ConnectionId();
+			connection_id = request_message->Cast<AppendRequestMessage>().ConnectionId();
 			break;
 		default:
 			break;
@@ -108,7 +108,7 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(unique_ptr<QuackMessa
 				error = response_message->Cast<ErrorMessage>().Error();
 			}
 			auto msg =
-			    QuackLogType::ConstructLogMessage(request_type, rpc_connection_id, client_query_id, query, uri.Http(),
+			    QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),
 			                                      end_time - start_time, response_message->Type(), error);
 			logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
 		}

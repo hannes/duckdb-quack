@@ -43,19 +43,19 @@ unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &conte
 		return make_uniq<QuackInsertGlobalState>(table.get_mutable()->Cast<QuackTableCatalogEntry>());
 	}
 	// CREATE TABLE AS path: create the table on the remote side first
-	auto &rpc_schema = schema.get_mutable()->Cast<QuackSchemaCatalogEntry>();
-	auto &rpc_catalog = rpc_schema.catalog.Cast<QuackCatalog>();
+	auto &quack_schema = schema.get_mutable()->Cast<QuackSchemaCatalogEntry>();
+	auto &quack_catalog = quack_schema.catalog.Cast<QuackCatalog>();
 
 	auto create_table_info = info->Base().Copy();
-	create_table_info->catalog = rpc_schema.GetInfo()->catalog;
-	create_table_info->schema = rpc_schema.GetInfo()->schema;
+	create_table_info->catalog = quack_schema.GetInfo()->catalog;
+	create_table_info->schema = quack_schema.GetInfo()->schema;
 
 	auto catalog_request_message =
-	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
+	    make_uniq<CatalogRequestMessage>(quack_catalog.GetConnectionId(), std::move(create_table_info));
 	auto catalog_response =
-	    rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
+	    quack_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
 	auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(
-	    rpc_schema.catalog, rpc_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
+	    quack_schema.catalog, quack_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
 	return make_uniq<QuackInsertGlobalState>(std::move(entry));
 }
 
@@ -65,13 +65,13 @@ unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &conte
 SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
 	auto &global_state = input.global_state.Cast<QuackInsertGlobalState>();
 	auto &tbl = global_state.table;
-	auto &rpc_catalog = tbl.catalog.Cast<QuackCatalog>();
+	auto &quack_catalog = tbl.catalog.Cast<QuackCatalog>();
 	auto append_chunk = make_uniq<DataChunk>();
 	append_chunk->Initialize(context.client, chunk.GetTypes());
 	append_chunk->Reference(chunk);
-	auto append_message = make_uniq<AppendRequestMessage>(rpc_catalog.GetConnectionId(), tbl.schema.name, tbl.name,
+	auto append_message = make_uniq<AppendRequestMessage>(quack_catalog.GetConnectionId(), tbl.schema.name, tbl.name,
 	                                                      std::move(append_chunk));
-	rpc_catalog.GetRawClient().Request<AppendResponseMessage>(std::move(append_message));
+	quack_catalog.GetRawClient().Request<AppendResponseMessage>(std::move(append_message));
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;
 }

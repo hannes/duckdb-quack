@@ -95,16 +95,16 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 		throw BinderException("catalog_name and query parameters cannot be NULL");
 	}
 
-	auto &rpc_catalog = GetQuackCatalog(context, input.inputs[0]);
+	auto &catalog = GetQuackCatalog(context, input.inputs[0]);
 
 	// TODO some of this stuff below is duplicated af
 
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<QuackScanBindData>();
-	bind_data->server_uri = rpc_catalog.GetServerUri();
-	bind_data->connection_id = rpc_catalog.GetConnectionId();
+	bind_data->server_uri = catalog.GetServerUri();
+	bind_data->connection_id = catalog.GetConnectionId();
 
-	auto bind_response = rpc_catalog.GetRawClient().Request<PrepareResponseMessage>(
+	auto bind_response = catalog.GetRawClient().Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query, true));
 
 	return_types = bind_response->Types();
@@ -337,7 +337,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 static OperatorPartitionData QuackScanGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
 	auto &local_state = input.local_state->Cast<QuackScanLocalState>();
 	// If we haven't received a batch yet, fall back to 0 so downstream doesn't choke; the
-	// planner only calls this after RpcScan has returned rows, by which point the current
+	// planner only calls this after QuackScan has returned rows, by which point the current
 	// batch index is always set.
 	auto idx = local_state.current_batch_index.IsValid() ? local_state.current_batch_index.GetIndex() : 0;
 	return OperatorPartitionData(idx);

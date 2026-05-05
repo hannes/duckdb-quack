@@ -71,7 +71,7 @@ public:
 	~HttpQuackServer() override;
 
 private:
-	static void ListenThread(HttpQuackServer *rpc_server, const string &listen_host, int listen_port);
+	static void ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port);
 
 	unique_ptr<duckdb_httplib::Server> server;
 };
