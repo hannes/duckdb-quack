@@ -10,12 +10,12 @@
 
 namespace duckdb {
 
-class RpcClient {
+class QuackClient {
 public:
-	explicit RpcClient(ClientContext &context_p, const RpcUri &uri_p) : context(context_p), uri(uri_p) {};
+	explicit QuackClient(ClientContext &context_p, const QuackUri &uri_p) : context(context_p), uri(uri_p) {};
 
 	template <class TARGET>
-	unique_ptr<TARGET> Request(unique_ptr<ProtocolMessage> request_message) {
+	unique_ptr<TARGET> Request(unique_ptr<QuackMessage> request_message) {
 		auto response_message = RequestInternal(std::move(request_message)).release();
 		if (response_message->Type() != TARGET::TYPE) {
 			if (response_message->Type() == MessageType::ERROR) {
@@ -29,27 +29,27 @@ public:
 		return unique_ptr<TARGET>(reinterpret_cast<TARGET *>(response_message));
 	}
 
-	static unique_ptr<RpcClient> GetClient(ClientContext &context, const RpcUri &uri);
+	static unique_ptr<QuackClient> GetClient(ClientContext &context, const QuackUri &uri);
 
-	virtual ~RpcClient() {};
+	virtual ~QuackClient() {};
 
 protected:
 	mutex request_mutex;
 	MemoryStream read_stream, write_stream;
 	ClientContext &context;
-	RpcUri uri;
+	QuackUri uri;
 
 private:
-	virtual unique_ptr<ProtocolMessage> RequestInternal(unique_ptr<ProtocolMessage> request_message) = 0;
+	virtual unique_ptr<QuackMessage> RequestInternal(unique_ptr<QuackMessage> request_message) = 0;
 };
 
-class HttpsRpcClient : public RpcClient {
+class HttpsQuackClient : public QuackClient {
 public:
-	HttpsRpcClient(ClientContext &context, const RpcUri &uri_p);
-	~HttpsRpcClient() override;
+	HttpsQuackClient(ClientContext &context, const QuackUri &uri_p);
+	~HttpsQuackClient() override;
 
 private:
-	unique_ptr<ProtocolMessage> RequestInternal(unique_ptr<ProtocolMessage> request_message) override;
+	unique_ptr<QuackMessage> RequestInternal(unique_ptr<QuackMessage> request_message) override;
 
 private:
 	unique_ptr<HTTPParams> http_params;

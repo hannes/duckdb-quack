@@ -3,12 +3,12 @@
 
 namespace duckdb {
 
-class RpcUri {
+class QuackUri {
 public:
-	RpcUri() : RpcUri("quack:localhost") {
+	QuackUri() : QuackUri("quack:localhost") {
 	} // orrr
 
-	RpcUri(string uri_p, bool ssl_p = true) : ssl(ssl_p), uri(uri_p) {
+	QuackUri(string uri_p, bool ssl_p = true) : ssl(ssl_p), uri(uri_p) {
 		// we should really instantiate a parser here instead, but alas
 		// whitespace be gone
 		ipv6 = false;

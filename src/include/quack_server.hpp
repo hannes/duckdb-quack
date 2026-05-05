@@ -12,7 +12,7 @@
 namespace duckdb {
 
 class ClientContext;
-class ProtocolMessage;
+class QuackMessage;
 class Connection;
 class MemoryStream;
 class QueryResult;
@@ -20,7 +20,7 @@ class DatabaseInstance;
 class PreparedStatement;
 class EncryptionState;
 
-struct RpcConnection {
+struct QuackConnection {
 	mutex lock;
 	unique_ptr<Connection> duckdb_connection;
 	//	unordered_map<string, std::pair<unique_ptr<PreparedStatement>, unique_ptr<QueryResult>>> duckdb_statements;
@@ -29,49 +29,49 @@ struct RpcConnection {
 	idx_t next_batch_index = 0;
 };
 
-class RpcServer {
+class QuackServer {
 public:
-	explicit RpcServer(ClientContext &context_p);
+	explicit QuackServer(ClientContext &context_p);
 	// TODO should listen be part of the constructor?
-	virtual void Listen(const RpcUri &uri) {};
+	virtual void Listen(const QuackUri &uri) {};
 
 	//! Synchronously stop accepting connections and join the listener threads.
 	virtual void Close() {};
 
-	optional_ptr<RpcConnection> GetConnection(const string &connection_id);
+	optional_ptr<QuackConnection> GetConnection(const string &connection_id);
 	string CreateNewConnection(const string &session_id);
 	// TODO need something to destroy connections
 
 	string GenerateSessionId();
 
-	virtual ~RpcServer();
+	virtual ~QuackServer();
 
 protected:
-	unique_ptr<ProtocolMessage> HandleMessage(ProtocolMessage &received_message);
-	unique_ptr<ProtocolMessage> HandleMessageInternal(ProtocolMessage &received_message);
+	unique_ptr<QuackMessage> HandleMessage(QuackMessage &received_message);
+	unique_ptr<QuackMessage> HandleMessageInternal(QuackMessage &received_message);
 
 protected:
 	std::vector<std::thread> listen_threads;
 
 	shared_ptr<DatabaseInstance> db;
 	mutex active_connections_mutex;
-	unordered_map<string, unique_ptr<RpcConnection>> active_connections;
+	unordered_map<string, unique_ptr<QuackConnection>> active_connections;
 
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
 };
 
-class HttpRpcServer : public RpcServer {
+class HttpQuackServer : public QuackServer {
 public:
-	HttpRpcServer(ClientContext &context_p) : RpcServer(context_p) {
+	HttpQuackServer(ClientContext &context_p) : QuackServer(context_p) {
 	}
-	void Listen(const RpcUri &uri) override;
+	void Listen(const QuackUri &uri) override;
 	void Close() override;
 
-	~HttpRpcServer() override;
+	~HttpQuackServer() override;
 
 private:
-	static void ListenThread(HttpRpcServer *rpc_server, const string &listen_host, int listen_port);
+	static void ListenThread(HttpQuackServer *rpc_server, const string &listen_host, int listen_port);
 
 	unique_ptr<duckdb_httplib::Server> server;
 };

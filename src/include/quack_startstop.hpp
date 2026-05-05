@@ -4,12 +4,12 @@ namespace duckdb {
 
 class TableFunction;
 
-class RpcStartFunction {
+class QuackServeFunction {
 public:
 	static TableFunction GetFunction();
 };
 
-class RpcStopFunction {
+class QuackStopFunction {
 public:
 	static TableFunction GetFunction();
 };

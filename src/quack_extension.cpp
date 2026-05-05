@@ -54,37 +54,37 @@ static void RegisterQuackSecretType(ExtensionLoader &loader) {
 	loader.RegisterFunction(config_fun);
 }
 
-static unique_ptr<Catalog> RpcAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
-                                     AttachedDatabase &db, const string &name, AttachInfo &info,
-                                     AttachOptions &attach_options) {
+static unique_ptr<Catalog> QuackAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
+                                       AttachedDatabase &db, const string &name, AttachInfo &info,
+                                       AttachOptions &attach_options) {
 	// info.path may or may not already carry the "quack:" prefix.
 	auto uri = StringUtil::StartsWith(info.path, "quack:") ? info.path : "quack:" + info.path;
-	auto initial_uri = RpcUri(uri);
+	auto initial_uri = QuackUri(uri);
 
 	// no ssl on local by default
 	auto enable_ssl = !initial_uri.IsLocal();
 	if (attach_options.options.find("disable_ssl") != attach_options.options.end()) {
 		enable_ssl = !attach_options.options["disable_ssl"].GetValue<bool>();
 	}
-	return make_uniq<RpcCatalog>(db, RpcUri(uri, enable_ssl), context);
+	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context);
 }
 
-static unique_ptr<TransactionManager> RpcCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
-                                                                  AttachedDatabase &db, Catalog &catalog) {
-	auto &rpc_catalog = catalog.Cast<RpcCatalog>();
-	return make_uniq<RpcTransactionManager>(db, rpc_catalog);
+static unique_ptr<TransactionManager> QuackCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
+                                                                    AttachedDatabase &db, Catalog &catalog) {
+	auto &rpc_catalog = catalog.Cast<QuackCatalog>();
+	return make_uniq<QuackTransactionManager>(db, rpc_catalog);
 }
 
-class RpcStorageExtension : public StorageExtension {
+class QuackStorageExtension : public StorageExtension {
 public:
-	RpcStorageExtension() {
-		attach = RpcAttach;
-		create_transaction_manager = RpcCreateTransactionManager;
+	QuackStorageExtension() {
+		attach = QuackAttach;
+		create_transaction_manager = QuackCreateTransactionManager;
 	}
 };
 
 // pass session id
-static void RpcAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
+static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
 	auto auth_str = args.GetValue(1, 0).GetValue<string>();
 	Value default_token_val;
 	auto &config = DBConfig::GetConfig(state.GetContext());
@@ -96,17 +96,17 @@ static void RpcAuthToken(const DataChunk &args, ExpressionState &state, Vector &
 	result.SetValue(0, Value(auth_str == default_token));
 }
 
-static void RpcDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
+static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
 	result.SetValue(0, Value(true)); // choose life
 }
 
-static void RpcUriParser(const DataChunk &args, ExpressionState &, Vector &result) {
+static void QuackUriParser(const DataChunk &args, ExpressionState &, Vector &result) {
 	D_ASSERT(args.size() == 2);
 	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
 	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::BOOLEAN);
 	D_ASSERT(result.GetType().id() == LogicalTypeId::STRUCT);
 
-	RpcUri parsed(args.GetValue(0, 0).GetValue<string>(), args.GetValue(1, 0).GetValue<bool>());
+	QuackUri parsed(args.GetValue(0, 0).GetValue<string>(), args.GetValue(1, 0).GetValue<bool>());
 
 	result.SetValue(0, Value::STRUCT({{"host", Value(parsed.Host())},
 	                                  {"port", Value::USMALLINT(parsed.Port())},
@@ -146,23 +146,23 @@ static TableFunction GetQuackIdentifyFunction() {
 static void LoadInternal(ExtensionLoader &loader) {
 	loader.SetDescription("Adds support for DuckDB Remote Procedure Calls (RPC)");
 
-	loader.RegisterFunction(RpcScanFunction::GetFunction());
-	loader.RegisterFunction(RpcScanByNameFunction::GetFunction());
+	loader.RegisterFunction(QuackScanFunction::GetFunction());
+	loader.RegisterFunction(QuackScanByNameFunction::GetFunction());
 	loader.RegisterFunction(GetQuackIdentifyFunction());
 
-	loader.RegisterFunction(RpcStartFunction::GetFunction());
-	loader.RegisterFunction(RpcStopFunction::GetFunction());
+	loader.RegisterFunction(QuackServeFunction::GetFunction());
+	loader.RegisterFunction(QuackStopFunction::GetFunction());
 
 	// the default authentication function
 	ScalarFunction rpc_auth_token("rpc_auth_token",
 	                              {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
-	                              LogicalType::BOOLEAN, RpcAuthToken);
+	                              LogicalType::BOOLEAN, QuackAuthToken);
 	rpc_auth_token.SetVolatile();
 	loader.RegisterFunction(rpc_auth_token);
 
 	ScalarFunction rpc_authorization("rpc_dummy_authorization",
 	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
-	                                 LogicalType::BOOLEAN, RpcDummyAuthorization);
+	                                 LogicalType::BOOLEAN, QuackDummyAuthorization);
 	rpc_authorization.SetVolatile();
 	loader.RegisterFunction(rpc_authorization);
 
@@ -173,17 +173,17 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                                                   {"ipv6", LogicalType::BOOLEAN},
 	                                                   {"ssl", LogicalType::BOOLEAN},
 	                                                   {"url", LogicalType::VARCHAR}}),
-	                              RpcUriParser);
+	                              QuackUriParser);
 	loader.RegisterFunction(rpc_uri_parser);
 
 	RegisterQuackSecretType(loader);
 
-	loader.GetDatabaseInstance().GetLogManager().RegisterLogType(make_uniq<RPCLogType>());
+	loader.GetDatabaseInstance().GetLogManager().RegisterLogType(make_uniq<QuackLogType>());
 
 	// (ab)use storage extension info to store our state
-	auto ext = duckdb::make_shared_ptr<RpcStorageExtension>();
-	ext->storage_info = duckdb::make_uniq<RpcStorageExtensionInfo>();
-	StorageExtension::Register(loader.GetDatabaseInstance().config, RpcStorageExtensionInfo::STORAGE_EXTENSION_KEY,
+	auto ext = duckdb::make_shared_ptr<QuackStorageExtension>();
+	ext->storage_info = duckdb::make_uniq<QuackStorageExtensionInfo>();
+	StorageExtension::Register(loader.GetDatabaseInstance().config, QuackStorageExtensionInfo::STORAGE_EXTENSION_KEY,
 	                           ext);
 
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());

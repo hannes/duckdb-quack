@@ -8,17 +8,17 @@ namespace duckdb {
 
 class DatabaseInstance;
 
-class RpcStorageExtensionInfo : public StorageExtensionInfo {
+class QuackStorageExtensionInfo : public StorageExtensionInfo {
 public:
-	static RpcStorageExtensionInfo &GetState(const DatabaseInstance &instance);
+	static QuackStorageExtensionInfo &GetState(const DatabaseInstance &instance);
 
-	RpcServer &FindOrCreateServer(ClientContext &context, const RpcUri &listen_uri);
-	bool StopServer(ClientContext &context, const RpcUri &listen_uri);
+	QuackServer &FindOrCreateServer(ClientContext &context, const QuackUri &listen_uri);
+	bool StopServer(ClientContext &context, const QuackUri &listen_uri);
 
 	static constexpr const char *STORAGE_EXTENSION_KEY = "quack";
 
 private:
 	std::mutex servers_mutex;
-	unordered_map<string, unique_ptr<RpcServer>> servers;
+	unordered_map<string, unique_ptr<QuackServer>> servers;
 };
 } // namespace duckdb

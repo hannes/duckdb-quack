@@ -10,14 +10,14 @@
 
 using namespace duckdb;
 
-RpcInsert::RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-                     physical_index_vector_t<idx_t> column_index_map_p)
+QuackInsert::QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
+                         physical_index_vector_t<idx_t> column_index_map_p)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr),
       column_index_map(std::move(column_index_map_p)) {
 }
 
-RpcInsert::RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
-                     unique_ptr<BoundCreateTableInfo> info)
+QuackInsert::QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
+                         unique_ptr<BoundCreateTableInfo> info)
     : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(nullptr), schema(&schema),
       info(std::move(info)) {
 }
@@ -25,26 +25,26 @@ RpcInsert::RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCat
 //===--------------------------------------------------------------------===//
 // States
 //===--------------------------------------------------------------------===//
-class RpcInsertGlobalState : public GlobalSinkState {
+class QuackInsertGlobalState : public GlobalSinkState {
 public:
-	explicit RpcInsertGlobalState(RpcTableCatalogEntry &table_p) : table(table_p), insert_count(0) {
+	explicit QuackInsertGlobalState(QuackTableCatalogEntry &table_p) : table(table_p), insert_count(0) {
 	}
-	explicit RpcInsertGlobalState(unique_ptr<CatalogEntry> owned_entry_p)
-	    : table(owned_entry_p->Cast<RpcTableCatalogEntry>()), owned_entry(std::move(owned_entry_p)), insert_count(0) {
+	explicit QuackInsertGlobalState(unique_ptr<CatalogEntry> owned_entry_p)
+	    : table(owned_entry_p->Cast<QuackTableCatalogEntry>()), owned_entry(std::move(owned_entry_p)), insert_count(0) {
 	}
 
-	RpcTableCatalogEntry &table;
+	QuackTableCatalogEntry &table;
 	unique_ptr<CatalogEntry> owned_entry;
 	idx_t insert_count;
 };
 
-unique_ptr<GlobalSinkState> RpcInsert::GetGlobalSinkState(ClientContext &context) const {
+unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &context) const {
 	if (table) {
-		return make_uniq<RpcInsertGlobalState>(table.get_mutable()->Cast<RpcTableCatalogEntry>());
+		return make_uniq<QuackInsertGlobalState>(table.get_mutable()->Cast<QuackTableCatalogEntry>());
 	}
 	// CREATE TABLE AS path: create the table on the remote side first
-	auto &rpc_schema = schema.get_mutable()->Cast<RpcSchemaCatalogEntry>();
-	auto &rpc_catalog = rpc_schema.catalog.Cast<RpcCatalog>();
+	auto &rpc_schema = schema.get_mutable()->Cast<QuackSchemaCatalogEntry>();
+	auto &rpc_catalog = rpc_schema.catalog.Cast<QuackCatalog>();
 
 	auto create_table_info = info->Base().Copy();
 	create_table_info->catalog = rpc_schema.GetInfo()->catalog;
@@ -54,18 +54,18 @@ unique_ptr<GlobalSinkState> RpcInsert::GetGlobalSinkState(ClientContext &context
 	    make_uniq<CatalogRequestMessage>(rpc_catalog.GetConnectionId(), std::move(create_table_info));
 	auto catalog_response =
 	    rpc_catalog.GetRawClient().Request<CatalogResponseMessage>(std::move(catalog_request_message));
-	auto entry = make_uniq_base<CatalogEntry, RpcTableCatalogEntry>(
+	auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(
 	    rpc_schema.catalog, rpc_schema, catalog_response->GetParseInfo()->Cast<CreateTableInfo>());
-	return make_uniq<RpcInsertGlobalState>(std::move(entry));
+	return make_uniq<QuackInsertGlobalState>(std::move(entry));
 }
 
 //===--------------------------------------------------------------------===//
 // Sink
 //===--------------------------------------------------------------------===//
-SinkResultType RpcInsert::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
-	auto &global_state = input.global_state.Cast<RpcInsertGlobalState>();
+SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, OperatorSinkInput &input) const {
+	auto &global_state = input.global_state.Cast<QuackInsertGlobalState>();
 	auto &tbl = global_state.table;
-	auto &rpc_catalog = tbl.catalog.Cast<RpcCatalog>();
+	auto &rpc_catalog = tbl.catalog.Cast<QuackCatalog>();
 	auto append_chunk = make_uniq<DataChunk>();
 	append_chunk->Initialize(context.client, chunk.GetTypes());
 	append_chunk->Reference(chunk);
@@ -79,8 +79,8 @@ SinkResultType RpcInsert::Sink(ExecutionContext &context, DataChunk &chunk, Oper
 //===--------------------------------------------------------------------===//
 // Finalize
 //===--------------------------------------------------------------------===//
-SinkFinalizeType RpcInsert::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
-                                     OperatorSinkFinalizeInput &input) const {
+SinkFinalizeType QuackInsert::Finalize(Pipeline &pipeline, Event &event, ClientContext &context,
+                                       OperatorSinkFinalizeInput &input) const {
 	// TODO nop?
 	return SinkFinalizeType::READY;
 }
@@ -88,9 +88,9 @@ SinkFinalizeType RpcInsert::Finalize(Pipeline &pipeline, Event &event, ClientCon
 //===--------------------------------------------------------------------===//
 // GetData
 //===--------------------------------------------------------------------===//
-SourceResultType RpcInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
-                                            OperatorSourceInput &input) const {
-	auto &insert_gstate = sink_state->Cast<RpcInsertGlobalState>();
+SourceResultType QuackInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
+                                              OperatorSourceInput &input) const {
+	auto &insert_gstate = sink_state->Cast<QuackInsertGlobalState>();
 	chunk.SetCardinality(1);
 	chunk.SetValue(0, 0, Value::BIGINT(NumericCast<int64_t>(insert_gstate.insert_count)));
 	return SourceResultType::FINISHED;
@@ -99,27 +99,27 @@ SourceResultType RpcInsert::GetDataInternal(ExecutionContext &context, DataChunk
 //===--------------------------------------------------------------------===//
 // Helpers
 //===--------------------------------------------------------------------===//
-string RpcInsert::GetName() const {
+string QuackInsert::GetName() const {
 	return table ? "RPC_INSERT" : "RPC_CREATE_TABLE_AS";
 }
 
-InsertionOrderPreservingMap<string> RpcInsert::ParamsToString() const {
+InsertionOrderPreservingMap<string> QuackInsert::ParamsToString() const {
 	InsertionOrderPreservingMap<string> result;
 	result["Table Name"] = table ? table->name : info->Base().table;
 	return result;
 }
 
-PhysicalOperator &RpcCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
-                                         optional_ptr<PhysicalOperator> plan) {
+PhysicalOperator &QuackCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
+                                           optional_ptr<PhysicalOperator> plan) {
 	D_ASSERT(plan);
-	auto &insert = planner.Make<RpcInsert>(op, op.table, op.column_index_map);
+	auto &insert = planner.Make<QuackInsert>(op, op.table, op.column_index_map);
 	insert.children.push_back(*plan);
 	return insert;
 }
 
-PhysicalOperator &RpcCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
-                                                LogicalCreateTable &op, PhysicalOperator &plan) {
-	auto &insert = planner.Make<RpcInsert>(op, op.schema, std::move(op.info));
+PhysicalOperator &QuackCatalog::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
+                                                  LogicalCreateTable &op, PhysicalOperator &plan) {
+	auto &insert = planner.Make<QuackInsert>(op, op.schema, std::move(op.info));
 	insert.children.push_back(plan);
 	return insert;
 }

@@ -13,15 +13,15 @@
 #include <queue>
 using namespace duckdb;
 
-static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBindInput &input,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunctionBindInput &input,
+                                              vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("call_rpc_server URI and query parameters cannot be NULL");
 	}
 
 	auto query = input.inputs[1].GetValue<string>();
-	auto initial_uri = RpcUri(input.inputs[0].GetValue<string>());
+	auto initial_uri = QuackUri(input.inputs[0].GetValue<string>());
 
 	// no ssl on local by default
 	auto enable_ssl = !initial_uri.IsLocal();
@@ -29,14 +29,14 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 		enable_ssl = !input.named_parameters["disable_ssl"].GetValue<bool>();
 	}
 
-	auto bind_data = make_uniq<RpcBindData>();
+	auto bind_data = make_uniq<QuackScanBindData>();
 
-	bind_data->server_uri = RpcUri(initial_uri.Uri(), enable_ssl);
+	bind_data->server_uri = QuackUri(initial_uri.Uri(), enable_ssl);
 
-	bind_data->initial_client = RpcClient::GetClient(context, bind_data->server_uri);
+	bind_data->initial_client = QuackClient::GetClient(context, bind_data->server_uri);
 
 	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
-	// global rpc_default_token setting. Mirrors the logic in RpcCatalog::RpcCatalog.
+	// global rpc_default_token setting. Mirrors the logic in QuackCatalog::QuackCatalog.
 	string token;
 	auto &secret_manager = SecretManager::Get(context);
 	auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
@@ -71,7 +71,7 @@ static unique_ptr<FunctionData> RpcBind(ClientContext &context, TableFunctionBin
 	return bind_data;
 }
 
-RpcCatalog &GetRpcCatalog(ClientContext &context, Value &catalog_name) {
+QuackCatalog &GetQuackCatalog(ClientContext &context, Value &catalog_name) {
 	if (catalog_name.IsNull()) {
 		throw BinderException("Catalog cannot be NULL");
 	}
@@ -86,21 +86,21 @@ RpcCatalog &GetRpcCatalog(ClientContext &context, Value &catalog_name) {
 	if (catalog.GetCatalogType() != "quack") {
 		throw BinderException("Attached database \"%s\" does not refer to a RPC database", db_name);
 	}
-	return catalog.Cast<RpcCatalog>();
+	return catalog.Cast<QuackCatalog>();
 }
 
-static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, TableFunctionBindInput &input,
-                                                   vector<LogicalType> &return_types, vector<string> &names) {
+static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context, TableFunctionBindInput &input,
+                                                         vector<LogicalType> &return_types, vector<string> &names) {
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("catalog_name and query parameters cannot be NULL");
 	}
 
-	auto &rpc_catalog = GetRpcCatalog(context, input.inputs[0]);
+	auto &rpc_catalog = GetQuackCatalog(context, input.inputs[0]);
 
 	// TODO some of this stuff below is duplicated af
 
 	auto query = input.inputs[1].GetValue<string>();
-	auto bind_data = make_uniq<RpcBindData>();
+	auto bind_data = make_uniq<QuackScanBindData>();
 	bind_data->server_uri = rpc_catalog.GetServerUri();
 	bind_data->connection_id = rpc_catalog.GetConnectionId();
 
@@ -117,8 +117,8 @@ static unique_ptr<FunctionData> RpcBindCatalogName(ClientContext &context, Table
 	return bind_data;
 }
 
-struct RpcLocalState : public LocalTableFunctionState {
-	unique_ptr<RpcClient> client;
+struct QuackScanLocalState : public LocalTableFunctionState {
+	unique_ptr<QuackClient> client;
 	//! batch_index of the batch that `fetched_results` currently holds chunks from (server-assigned).
 	//! Surfaced to DuckDB via get_partition_data so downstream order-preserving operators
 	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
@@ -127,14 +127,14 @@ struct RpcLocalState : public LocalTableFunctionState {
 	queue<unique_ptr<DataChunk>> results;
 	ColumnDataScanState scan_state;
 
-	explicit RpcLocalState() {
+	explicit QuackScanLocalState() {
 	}
-	~RpcLocalState() override {
+	~QuackScanLocalState() override {
 	}
 };
 
-struct RpcGlobalState : GlobalTableFunctionState {
-	explicit RpcGlobalState(vector<column_t> column_ids_p, vector<idx_t> projection_id_p, bool needs_more_fetch_p)
+struct QuackScanGlobalState : GlobalTableFunctionState {
+	explicit QuackScanGlobalState(vector<column_t> column_ids_p, vector<idx_t> projection_id_p, bool needs_more_fetch_p)
 	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(column_ids_p), projection_ids(projection_id_p),
 	      needs_more_fetch(needs_more_fetch_p) {
 	}
@@ -177,7 +177,7 @@ static bool CanPushdownFilter(const TableFilter &filter) {
 	}
 }
 
-static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFunctionInitInput &input) {
+static string BuildPushdownQuery(const QuackScanBindData &bind_data, const TableFunctionInitInput &input) {
 	string query;
 
 	// Projection: select only the columns DuckDB actually needs in the output.
@@ -230,8 +230,8 @@ static string BuildPushdownQuery(const RpcBindData &bind_data, const TableFuncti
 	return query;
 }
 
-unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
+unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
+	auto &bind_data = input.bind_data->CastNoConst<QuackScanBindData>();
 
 	// For the catalog path (ATTACH), LookupEntry only prepares without executing
 	// to avoid the server-side result being overwritten by subsequent lookups.
@@ -239,7 +239,7 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
-		auto client = RpcClient::GetClient(context, bind_data.server_uri);
+		auto client = QuackClient::GetClient(context, bind_data.server_uri);
 		auto response_message = client->Request<PrepareResponseMessage>(
 		    make_uniq<PrepareRequestMessage>(bind_data.connection_id, query, true));
 		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
@@ -247,20 +247,20 @@ unique_ptr<GlobalTableFunctionState> RpcInitGlobal(ClientContext &context, Table
 	}
 
 	// we only multithread if there is more to fetch
-	return make_uniq<RpcGlobalState>(input.column_ids, input.projection_ids, bind_data.needs_more_fetch);
+	return make_uniq<QuackScanGlobalState>(input.column_ids, input.projection_ids, bind_data.needs_more_fetch);
 }
 
-unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
-                                                 GlobalTableFunctionState *global_state_p) {
-	auto &bind_data = input.bind_data->CastNoConst<RpcBindData>();
+unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
+                                                       GlobalTableFunctionState *global_state_p) {
+	auto &bind_data = input.bind_data->CastNoConst<QuackScanBindData>();
 	lock_guard<mutex> guard(bind_data.lock);
 
-	auto local_state = make_uniq<RpcLocalState>();
+	auto local_state = make_uniq<QuackScanLocalState>();
 	// re-use initial client from bind if possible
 	if (bind_data.initial_client) {
 		local_state->client = std::move(bind_data.initial_client);
 	} else {
-		local_state->client = RpcClient::GetClient(context.client, bind_data.server_uri);
+		local_state->client = QuackClient::GetClient(context.client, bind_data.server_uri);
 	}
 
 	if (!bind_data.results.empty()) {
@@ -272,10 +272,10 @@ unique_ptr<LocalTableFunctionState> RpcInitLocal(ExecutionContext &context, Tabl
 	return local_state;
 }
 
-static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
-	auto &bind_data = input.bind_data->Cast<RpcBindData>();
-	auto &global_state = input.global_state->Cast<RpcGlobalState>();
-	auto &local_state = input.local_state->Cast<RpcLocalState>();
+static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChunk &output) {
+	auto &bind_data = input.bind_data->Cast<QuackScanBindData>();
+	auto &global_state = input.global_state->Cast<QuackScanGlobalState>();
+	auto &local_state = input.local_state->Cast<QuackScanLocalState>();
 
 	while (true) {
 		// first we try to scan from our local results buffer if we have any
@@ -334,8 +334,8 @@ static void RpcScan(ClientContext &context, TableFunctionInput &input, DataChunk
 	}
 }
 
-static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
-	auto &local_state = input.local_state->Cast<RpcLocalState>();
+static OperatorPartitionData QuackScanGetPartitionData(ClientContext &, TableFunctionGetPartitionInput &input) {
+	auto &local_state = input.local_state->Cast<QuackScanLocalState>();
 	// If we haven't received a batch yet, fall back to 0 so downstream doesn't choke; the
 	// planner only calls this after RpcScan has returned rows, by which point the current
 	// batch index is always set.
@@ -343,31 +343,31 @@ static OperatorPartitionData RpcGetPartitionData(ClientContext &, TableFunctionG
 	return OperatorPartitionData(idx);
 }
 
-InsertionOrderPreservingMap<string> RpcCallToString(TableFunctionToStringInput &input) {
-	auto &bind_data = input.bind_data->Cast<RpcBindData>();
+InsertionOrderPreservingMap<string> QuackScanToString(TableFunctionToStringInput &input) {
+	auto &bind_data = input.bind_data->Cast<QuackScanBindData>();
 	InsertionOrderPreservingMap<string> result;
 	result["Server"] = bind_data.server_uri.Uri();
 	return result;
 }
 
-TableFunction RpcScanFunction::GetFunction() {
-	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan, RpcBind, RpcInitGlobal,
-	                         RpcInitLocal);
+TableFunction QuackScanFunction::GetFunction() {
+	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan, QuackScanBind,
+	                         QuackScanInitGlobal, QuackScanInitLocal);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.projection_pushdown = true;
-	fun.get_partition_data = RpcGetPartitionData;
-	fun.to_string = RpcCallToString;
+	fun.get_partition_data = QuackScanGetPartitionData;
+	fun.to_string = QuackScanToString;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
 }
 
-TableFunction RpcScanByNameFunction::GetFunction() {
-	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, RpcScan,
-	                         RpcBindCatalogName, RpcInitGlobal, RpcInitLocal);
+TableFunction QuackScanByNameFunction::GetFunction() {
+	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan,
+	                         QuackScanBindCatalogName, QuackScanInitGlobal, QuackScanInitLocal);
 	fun.projection_pushdown = true;
-	fun.get_partition_data = RpcGetPartitionData;
-	fun.to_string = RpcCallToString;
+	fun.get_partition_data = QuackScanGetPartitionData;
+	fun.to_string = QuackScanToString;
 
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;

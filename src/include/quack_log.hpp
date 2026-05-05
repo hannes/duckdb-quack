@@ -5,12 +5,12 @@
 
 namespace duckdb {
 
-class RPCLogType : public LogType {
+class QuackLogType : public LogType {
 public:
 	static constexpr const char *NAME = "RPC";
 	static constexpr LogLevel LEVEL = LogLevel::LOG_DEBUG;
 
-	RPCLogType();
+	QuackLogType();
 
 	static LogicalType GetLogType();
 	static string ConstructLogMessage(MessageType request_type, const string &rpc_connection_id,

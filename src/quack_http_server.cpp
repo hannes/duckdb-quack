@@ -8,7 +8,7 @@
 
 using namespace duckdb;
 
-void HttpRpcServer::Close() {
+void HttpQuackServer::Close() {
 	// Stops accepting new connections and joins the listener threads (NOT the
 	// httplib worker pool)
 	server->stop();
@@ -22,18 +22,18 @@ void HttpRpcServer::Close() {
 	}
 }
 
-HttpRpcServer::~HttpRpcServer() {
+HttpQuackServer::~HttpQuackServer() {
 	Close();
 }
 
-void HttpRpcServer::ListenThread(HttpRpcServer *rpc_server, const string &listen_host, int listen_port) {
+void HttpQuackServer::ListenThread(HttpQuackServer *rpc_server, const string &listen_host, int listen_port) {
 	D_ASSERT(rpc_server);
 	D_ASSERT(rpc_server->server);
 	D_ASSERT(listen_port > 1 && listen_port < 65535);
 	rpc_server->server->listen(listen_host, listen_port);
 }
 
-void HttpRpcServer::Listen(const RpcUri &uri) {
+void HttpQuackServer::Listen(const QuackUri &uri) {
 	server = make_uniq<duckdb_httplib::Server>();
 
 	// Each keep-alive connection holds a server thread for its lifetime.
@@ -68,7 +68,7 @@ void HttpRpcServer::Listen(const RpcUri &uri) {
 			stream.WriteData((data_ptr_t)data, data_length);
 			return true;
 		});
-		HandleMessage(*ProtocolMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
+		HandleMessage(*QuackMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
 		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/duckdb");
 	});
 

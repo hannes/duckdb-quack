@@ -14,12 +14,12 @@ string GetUriPart(T ele) {
 	return string(ele.first, ele.afterLast - ele.first);
 }
 
-HttpsRpcClient::HttpsRpcClient(ClientContext &context, const RpcUri &uri_p) : RpcClient(context, uri_p) {};
+HttpsQuackClient::HttpsQuackClient(ClientContext &context, const QuackUri &uri_p) : QuackClient(context, uri_p) {};
 
-HttpsRpcClient::~HttpsRpcClient() {
+HttpsQuackClient::~HttpsQuackClient() {
 }
 
-unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolMessage> request_message) {
+unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(unique_ptr<QuackMessage> request_message) {
 	D_ASSERT(request_message);
 
 	lock_guard<mutex> guard(request_mutex);
@@ -55,7 +55,7 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 	}
 
 	MemoryStream non_owning_read_stream((data_ptr_t)post_request.buffer_out.data(), post_request.buffer_out.size());
-	auto response_message = ProtocolMessage::FromMemoryStream(non_owning_read_stream);
+	auto response_message = QuackMessage::FromMemoryStream(non_owning_read_stream);
 
 	// logging stuff, own scope
 	{
@@ -89,7 +89,7 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 
 		// Inject client_query_id from context into the message before sending.
 		// Guard against reading the active query during transaction start itself
-		// (e.g. BEGIN TRANSACTION via RpcCatalog::ExecuteCommand), where the
+		// (e.g. BEGIN TRANSACTION via QuackCatalog::ExecuteCommand), where the
 		// transaction isn't yet installed on the TransactionContext.
 
 		if (context.transaction.HasActiveTransaction()) {
@@ -102,27 +102,27 @@ unique_ptr<ProtocolMessage> HttpsRpcClient::RequestInternal(unique_ptr<ProtocolM
 
 		// Log RPC message
 		auto &logger = Logger::Get(context);
-		if (logger.ShouldLog(RPCLogType::NAME, RPCLogType::LEVEL)) {
+		if (logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
 			string error;
 			if (response_message->Type() == MessageType::ERROR) {
 				error = response_message->Cast<ErrorMessage>().Error();
 			}
 			auto msg =
-			    RPCLogType::ConstructLogMessage(request_type, rpc_connection_id, client_query_id, query, uri.Http(),
-			                                    end_time - start_time, response_message->Type(), error);
-			logger.WriteLog(RPCLogType::NAME, RPCLogType::LEVEL, msg);
+			    QuackLogType::ConstructLogMessage(request_type, rpc_connection_id, client_query_id, query, uri.Http(),
+			                                      end_time - start_time, response_message->Type(), error);
+			logger.WriteLog(QuackLogType::NAME, QuackLogType::LEVEL, msg);
 		}
 	}
 
 	return response_message;
 }
 
-unique_ptr<RpcClient> RpcClient::GetClient(ClientContext &context, const RpcUri &uri) {
+unique_ptr<QuackClient> QuackClient::GetClient(ClientContext &context, const QuackUri &uri) {
 	auto &db = *context.db;
 	ExtensionHelper::AutoLoadExtension(db, "httpfs");
 	if (!db.ExtensionIsLoaded("httpfs")) {
 		throw MissingExtensionException("The rpc extension requires the httpfs extension to be loaded!");
 	}
 
-	return make_uniq<HttpsRpcClient>(context, uri);
+	return make_uniq<HttpsQuackClient>(context, uri);
 }

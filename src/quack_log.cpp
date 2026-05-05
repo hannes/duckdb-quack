@@ -2,12 +2,12 @@
 
 namespace duckdb {
 
-constexpr LogLevel RPCLogType::LEVEL;
+constexpr LogLevel QuackLogType::LEVEL;
 
-RPCLogType::RPCLogType() : LogType(NAME, LEVEL, GetLogType()) {
+QuackLogType::QuackLogType() : LogType(NAME, LEVEL, GetLogType()) {
 }
 
-LogicalType RPCLogType::GetLogType() {
+LogicalType QuackLogType::GetLogType() {
 	child_list_t<LogicalType> child_list = {
 	    {"message_type", LogicalType::VARCHAR},    {"rpc_connection_id", LogicalType::VARCHAR},
 	    {"client_query_id", LogicalType::UBIGINT}, {"query", LogicalType::VARCHAR},
@@ -17,9 +17,9 @@ LogicalType RPCLogType::GetLogType() {
 	return LogicalType::STRUCT(child_list);
 }
 
-string RPCLogType::ConstructLogMessage(MessageType request_type, const string &rpc_connection_id,
-                                       optional_idx client_query_id, const string &query, const string &server_uri,
-                                       int64_t duration_ms, MessageType response_type, const string &error) {
+string QuackLogType::ConstructLogMessage(MessageType request_type, const string &rpc_connection_id,
+                                         optional_idx client_query_id, const string &query, const string &server_uri,
+                                         int64_t duration_ms, MessageType response_type, const string &error) {
 	child_list_t<Value> child_list = {
 	    {"message_type", Value(MessageTypeToString(request_type))},
 	    {"rpc_connection_id", Value(rpc_connection_id)},

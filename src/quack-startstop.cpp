@@ -5,18 +5,18 @@
 
 using namespace duckdb;
 
-struct RpcStartStopFunctionData : public TableFunctionData {
-	RpcStartStopFunctionData() {
+struct QuackStartStopFunctionData : public TableFunctionData {
+	QuackStartStopFunctionData() {
 	}
 
 	bool finished = false;
 	bool auth_is_default = false;
-	RpcUri listen_uri;
+	QuackUri listen_uri;
 };
 
-static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFunctionBindInput &input,
-                                             vector<LogicalType> &return_types, vector<string> &names) {
-	auto bind_data = make_uniq<RpcStartStopFunctionData>();
+static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunctionBindInput &input,
+                                               vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<QuackStartStopFunctionData>();
 	auto &uri_value = input.inputs[0];
 	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
 		throw InvalidInputException("Invalid listen string specified");
@@ -25,7 +25,8 @@ static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFuncti
 	auto allow_other_hostname = input.named_parameters.find("allow_other_hostname") != input.named_parameters.end() &&
 	                            input.named_parameters["allow_other_hostname"].GetValue<bool>();
 
-	bind_data->listen_uri = RpcUri(uri_value.GetValue<string>(), /* the server will always listen without SSL */ false);
+	bind_data->listen_uri =
+	    QuackUri(uri_value.GetValue<string>(), /* the server will always listen without SSL */ false);
 	if (!allow_other_hostname && !bind_data->listen_uri.IsLocal()) {
 		throw InvalidInputException(
 		    "Only localhost is allowed as a Quack RPC hostname by default, set allow_other_hostname=true to override. "
@@ -51,13 +52,13 @@ static unique_ptr<FunctionData> RpcStartBind(ClientContext &context, TableFuncti
 	return std::move(bind_data);
 }
 
-static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &bind_data = data_p.bind_data->CastNoConst<RpcStartStopFunctionData>();
+static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind_data = data_p.bind_data->CastNoConst<QuackStartStopFunctionData>();
 	if (bind_data.finished) {
 		return;
 	}
 
-	auto &server = RpcStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_uri);
+	auto &server = QuackStorageExtensionInfo::GetState(*context.db).FindOrCreateServer(context, bind_data.listen_uri);
 	output.SetValue(0, 0, bind_data.listen_uri.Uri());
 	output.SetValue(1, 0, bind_data.listen_uri.Http());
 
@@ -83,34 +84,34 @@ static void RpcStartFun(ClientContext &context, TableFunctionInput &data_p, Data
 	bind_data.finished = true;
 }
 
-TableFunction RpcStartFunction::GetFunction() {
-	auto fun = TableFunction("rpc_start", {LogicalType::VARCHAR}, RpcStartFun, RpcStartBind);
+TableFunction QuackServeFunction::GetFunction() {
+	auto fun = TableFunction("rpc_start", {LogicalType::VARCHAR}, QuackServe, QuackServeBind);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
 	return fun;
 }
 
-static unique_ptr<FunctionData> RpcStopBind(ClientContext &context, TableFunctionBindInput &input,
-                                            vector<LogicalType> &return_types, vector<string> &names) {
-	auto bind_data = make_uniq<RpcStartStopFunctionData>();
+static unique_ptr<FunctionData> QuackStopBind(ClientContext &context, TableFunctionBindInput &input,
+                                              vector<LogicalType> &return_types, vector<string> &names) {
+	auto bind_data = make_uniq<QuackStartStopFunctionData>();
 	auto &uri_value = input.inputs[0];
 	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
 		throw InvalidInputException("Invalid listen string specified");
 	}
 	bind_data->listen_uri =
-	    RpcUri(uri_value.GetValue<string>(), /* not really, but we don't want to ask the user again */ true);
+	    QuackUri(uri_value.GetValue<string>(), /* not really, but we don't want to ask the user again */ true);
 	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("status");
 
 	return std::move(bind_data);
 }
 
-static void RpcStopFun(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
-	auto &bind_data = data_p.bind_data->CastNoConst<RpcStartStopFunctionData>();
+static void QuackStop(ClientContext &context, TableFunctionInput &data_p, DataChunk &output) {
+	auto &bind_data = data_p.bind_data->CastNoConst<QuackStartStopFunctionData>();
 	if (bind_data.finished) {
 		return;
 	}
-	auto &rpc_state = RpcStorageExtensionInfo::GetState(*context.db);
+	auto &rpc_state = QuackStorageExtensionInfo::GetState(*context.db);
 	if (rpc_state.StopServer(context, bind_data.listen_uri)) {
 		output.data[0].SetValue(0, StringUtil::Format("Stopped listening on %s", bind_data.listen_uri.Uri()));
 	} else {
@@ -120,13 +121,6 @@ static void RpcStopFun(ClientContext &context, TableFunctionInput &data_p, DataC
 	bind_data.finished = true;
 }
 
-TableFunction RpcStopFunction::GetFunction() {
-	return TableFunction("rpc_stop", {LogicalType::VARCHAR}, RpcStopFun, RpcStopBind);
+TableFunction QuackStopFunction::GetFunction() {
+	return TableFunction("rpc_stop", {LogicalType::VARCHAR}, QuackStop, QuackStopBind);
 }
-
-struct RpcGenerateKeysFunctionData : public TableFunctionData {
-	RpcGenerateKeysFunctionData() {
-	}
-
-	bool finished = false;
-};

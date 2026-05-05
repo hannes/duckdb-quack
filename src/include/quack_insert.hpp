@@ -13,14 +13,14 @@
 
 namespace duckdb {
 
-class RpcInsert : public PhysicalOperator {
+class QuackInsert : public PhysicalOperator {
 public:
 	//! INSERT INTO
-	RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-	          physical_index_vector_t<idx_t> column_index_map);
+	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
+	            physical_index_vector_t<idx_t> column_index_map);
 	//! CREATE TABLE AS
-	RpcInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
-	          unique_ptr<BoundCreateTableInfo> info);
+	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
+	            unique_ptr<BoundCreateTableInfo> info);
 
 	//! The table to insert into
 	optional_ptr<TableCatalogEntry> table;

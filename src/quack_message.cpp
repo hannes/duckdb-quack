@@ -37,7 +37,7 @@ string duckdb::MessageTypeToString(MessageType type) {
 	return "INVALID";
 }
 
-void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) const {
+void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	write_stream.Rewind();
 	SerializationOptions options;
 	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
@@ -48,17 +48,17 @@ void ProtocolMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	serializer.End();
 }
 
-unique_ptr<ProtocolMessage> ProtocolMessage::FromMemoryStream(MemoryStream &read_stream) {
+unique_ptr<QuackMessage> QuackMessage::FromMemoryStream(MemoryStream &read_stream) {
 	read_stream.Rewind();
 	BinaryDeserializer deserializer(read_stream);
 	return Deserialize(deserializer);
 }
 
-void ProtocolMessage::Serialize(Serializer &serializer) const {
+void QuackMessage::Serialize(Serializer &serializer) const {
 	serializer.WriteProperty<uint8_t>(10, "message_type", static_cast<uint8_t>(message_type));
 }
 
-unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer) {
 	auto message_type = static_cast<MessageType>(deserializer.ReadProperty<uint8_t>(10, "message_type"));
 	switch (message_type) {
 	case MessageType::CONNECTION_REQUEST:
@@ -89,34 +89,34 @@ unique_ptr<ProtocolMessage> ProtocolMessage::Deserialize(Deserializer &deseriali
 }
 
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(80, "auth_string", auth_string);
 }
 
-unique_ptr<ProtocolMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto auth_string = deserializer.ReadProperty<string>(80, "auth_string");
 	return make_uniq<ConnectionRequestMessage>(auth_string);
 }
 
 void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 }
 
-unique_ptr<ProtocolMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	return make_uniq<ConnectionResponseMessage>(connection_id);
 }
 
 void PrepareRequestMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 	serializer.WriteProperty<string>(200, "sql_query", sql_query);
 	serializer.WriteProperty<bool>(201, "immediately_execute", immediately_execute);
 }
 
-unique_ptr<ProtocolMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 	auto sql_query = deserializer.ReadProperty<string>(200, "sql_query");
@@ -127,7 +127,7 @@ unique_ptr<ProtocolMessage> PrepareRequestMessage::Deserialize(Deserializer &des
 }
 
 void PrepareResponseMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<vector<LogicalType>>(210, "result_types", result_types);
 	serializer.WriteProperty<vector<string>>(211, "result_names", result_names);
 	serializer.WriteProperty<bool>(215, "needs_more_fetch", needs_more_fetch);
@@ -137,7 +137,7 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	});
 }
 
-unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result_types = deserializer.ReadProperty<vector<LogicalType>>(210, "result_types");
 	auto result_names = deserializer.ReadProperty<vector<string>>(211, "result_names");
 	auto needs_more_fetch = deserializer.ReadProperty<bool>(215, "needs_more_fetch");
@@ -154,12 +154,12 @@ unique_ptr<ProtocolMessage> PrepareResponseMessage::Deserialize(Deserializer &de
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 }
 
-unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 
@@ -169,14 +169,14 @@ unique_ptr<ProtocolMessage> FetchRequestMessage::Deserialize(Deserializer &deser
 }
 
 void FetchResponseMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<optional_idx>(253, "batch_index", batch_index);
 	serializer.WriteList(254, "results", results.size(), [&](Serializer::List &list, idx_t i) {
 		list.WriteObject([&](Serializer &inner) { results[i]->Serialize(inner); });
 	});
 }
 
-unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto batch_index = deserializer.ReadProperty<optional_idx>(253, "batch_index");
 	vector<unique_ptr<DataChunk>> results;
 
@@ -190,18 +190,18 @@ unique_ptr<ProtocolMessage> FetchResponseMessage::Deserialize(Deserializer &dese
 }
 
 void ErrorMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(260, "error_message", error_message);
 }
 
-unique_ptr<ProtocolMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
 	auto error_message = deserializer.ReadProperty<string>(260, "error_message");
 	return make_uniq<ErrorMessage>(error_message);
 }
 
 void CatalogRequestMessage::Serialize(Serializer &serializer) const {
 	D_ASSERT(parse_info);
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 	// FIXME this is only required because serialization of parse info is borked
@@ -209,7 +209,7 @@ void CatalogRequestMessage::Serialize(Serializer &serializer) const {
 	parse_info->Serialize(serializer);
 }
 
-unique_ptr<ProtocolMessage> CatalogRequestMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> CatalogRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id = deserializer.ReadProperty<string>(98, "connection_id");
 	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
@@ -229,13 +229,13 @@ unique_ptr<ProtocolMessage> CatalogRequestMessage::Deserialize(Deserializer &des
 
 void CatalogResponseMessage::Serialize(Serializer &serializer) const {
 	D_ASSERT(parse_info);
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<ParseInfoType>(97, "info_type", parse_info->info_type);
 	parse_info->Serialize(serializer);
 }
 
 // TODO this is duplicated
-unique_ptr<ProtocolMessage> CatalogResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> CatalogResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto info_type = deserializer.ReadProperty<ParseInfoType>(97, "info_type");
 	unique_ptr<ParseInfo> parse_info;
 	switch (info_type) {
@@ -251,7 +251,7 @@ unique_ptr<ProtocolMessage> CatalogResponseMessage::Deserialize(Deserializer &de
 
 void AppendRequestMessage::Serialize(Serializer &serializer) const {
 	D_ASSERT(append_chunk);
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 	serializer.WriteProperty<string>(98, "connection_id", connection_id);
 	serializer.WriteProperty<optional_idx>(99, "client_query_id", client_query_id);
 	serializer.WriteProperty<string>(270, "schema_name", schema_name);
@@ -261,7 +261,7 @@ void AppendRequestMessage::Serialize(Serializer &serializer) const {
 	                       [&](Serializer &inner_serializer) { append_chunk->Serialize(inner_serializer); });
 }
 
-unique_ptr<ProtocolMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto connection_id_p = deserializer.ReadProperty<string>(98, "connection_id");
 	auto cqid = deserializer.ReadProperty<optional_idx>(99, "client_query_id");
 	auto schema_name_p = deserializer.ReadProperty<string>(270, "schema_name");
@@ -277,9 +277,9 @@ unique_ptr<ProtocolMessage> AppendRequestMessage::Deserialize(Deserializer &dese
 }
 
 void AppendResponseMessage::Serialize(Serializer &serializer) const {
-	ProtocolMessage::Serialize(serializer);
+	QuackMessage::Serialize(serializer);
 }
 
-unique_ptr<ProtocolMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<QuackMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
 	return make_uniq<AppendResponseMessage>();
 }
