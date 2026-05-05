@@ -19,7 +19,7 @@ foreach server 'quack:localhost'
 foreach ssl true
 
 statement ok con1
-call rpc_start({server});
+call quack_serve({server});
 
 statement ok con2
 attach {server} as rpc;

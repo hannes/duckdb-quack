@@ -183,7 +183,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
 		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authentication_function")),
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authentication_function")),
 		        Value(session_id), Value(connection_request_message.AuthString()))) {
 			return make_uniq<ErrorMessage>("Authentication failed");
 		}
@@ -198,7 +198,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 
 		// TODO do not do this if there is no fun set
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "rpc_authorization_function")),
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authorization_function")),
 		        Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()))) {
 			return make_uniq<ErrorMessage>("Authorization failed");
 		}

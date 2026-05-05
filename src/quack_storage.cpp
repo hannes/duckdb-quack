@@ -4,6 +4,7 @@
 
 #include "quack_storage.hpp"
 #include "quack_server.hpp"
+#include "quack_catalog.hpp"
 
 using namespace duckdb;
 
@@ -47,4 +48,30 @@ bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUr
 	// quack_stop is invoked from inside one of the server's own worker threads
 	std::thread([srv = std::move(to_destroy)]() mutable { srv.reset(); }).detach();
 	return true;
+}
+
+static unique_ptr<Catalog> QuackAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
+                                       AttachedDatabase &db, const string &name, AttachInfo &info,
+                                       AttachOptions &attach_options) {
+	// info.path may or may not already carry the "quack:" prefix.
+	auto uri = StringUtil::StartsWith(info.path, "quack:") ? info.path : "quack:" + info.path;
+	auto initial_uri = QuackUri(uri);
+
+	// no ssl on local by default
+	auto enable_ssl = !initial_uri.IsLocal();
+	if (attach_options.options.find("disable_ssl") != attach_options.options.end()) {
+		enable_ssl = !attach_options.options["disable_ssl"].GetValue<bool>();
+	}
+	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context);
+}
+
+static unique_ptr<TransactionManager> QuackCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
+                                                                    AttachedDatabase &db, Catalog &catalog) {
+	auto &quack_catalog = catalog.Cast<QuackCatalog>();
+	return make_uniq<QuackTransactionManager>(db, quack_catalog);
+}
+
+QuackStorageExtension::QuackStorageExtension() {
+	attach = QuackAttach;
+	create_transaction_manager = QuackCreateTransactionManager;
 }

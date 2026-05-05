@@ -14,7 +14,7 @@ create table test_data as select range i, range * 2 as doubled, 'name_' || range
 foreach server 'quack:localhost'
 
 statement ok con1
-call rpc_start({server});
+call quack_serve({server});
 
 statement ok con2
 attach {server} as rpc

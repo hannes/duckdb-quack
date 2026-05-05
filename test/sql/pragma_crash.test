@@ -16,7 +16,7 @@ foreach server 'quack:localhost:20118'
 foreach ssl true
 
 statement ok con1
-call rpc_start({server});
+call quack_serve({server});
 
 statement ok con2
 create or replace secret q2 (TYPE quack, SCOPE {server}, TOKEN '1234');

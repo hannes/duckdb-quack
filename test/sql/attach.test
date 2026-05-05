@@ -21,10 +21,10 @@ foreach server 'quack:localhost'
 
 
 statement ok con1
-call rpc_start({server});
+call quack_serve({server});
 
 query II con2
-from rpc_call({server}, 'select 42, 43')
+from quack_query({server}, 'select 42, 43')
 ----
 42	43
 

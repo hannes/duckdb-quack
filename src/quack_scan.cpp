@@ -351,7 +351,7 @@ InsertionOrderPreservingMap<string> QuackScanToString(TableFunctionToStringInput
 }
 
 TableFunction QuackScanFunction::GetFunction() {
-	auto fun = TableFunction("rpc_call", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan, QuackScanBind,
+	auto fun = TableFunction("quack_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan, QuackScanBind,
 	                         QuackScanInitGlobal, QuackScanInitLocal);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.projection_pushdown = true;
@@ -363,12 +363,11 @@ TableFunction QuackScanFunction::GetFunction() {
 }
 
 TableFunction QuackScanByNameFunction::GetFunction() {
-	auto fun = TableFunction("rpc_call_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan,
+	auto fun = TableFunction("quack_query_by_name", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan,
 	                         QuackScanBindCatalogName, QuackScanInitGlobal, QuackScanInitLocal);
 	fun.projection_pushdown = true;
 	fun.get_partition_data = QuackScanGetPartitionData;
 	fun.to_string = QuackScanToString;
-
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;

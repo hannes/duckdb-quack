@@ -18,6 +18,7 @@
 #include "quack_startstop.hpp"
 #include "quack_storage.hpp"
 #include "quack_uri.hpp"
+#include "include/quack_uri.hpp"
 
 namespace duckdb {
 
@@ -54,35 +55,6 @@ static void RegisterQuackSecretType(ExtensionLoader &loader) {
 	loader.RegisterFunction(config_fun);
 }
 
-static unique_ptr<Catalog> QuackAttach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
-                                       AttachedDatabase &db, const string &name, AttachInfo &info,
-                                       AttachOptions &attach_options) {
-	// info.path may or may not already carry the "quack:" prefix.
-	auto uri = StringUtil::StartsWith(info.path, "quack:") ? info.path : "quack:" + info.path;
-	auto initial_uri = QuackUri(uri);
-
-	// no ssl on local by default
-	auto enable_ssl = !initial_uri.IsLocal();
-	if (attach_options.options.find("disable_ssl") != attach_options.options.end()) {
-		enable_ssl = !attach_options.options["disable_ssl"].GetValue<bool>();
-	}
-	return make_uniq<QuackCatalog>(db, QuackUri(uri, enable_ssl), context);
-}
-
-static unique_ptr<TransactionManager> QuackCreateTransactionManager(optional_ptr<StorageExtensionInfo> storage_info,
-                                                                    AttachedDatabase &db, Catalog &catalog) {
-	auto &quack_catalog = catalog.Cast<QuackCatalog>();
-	return make_uniq<QuackTransactionManager>(db, quack_catalog);
-}
-
-class QuackStorageExtension : public StorageExtension {
-public:
-	QuackStorageExtension() {
-		attach = QuackAttach;
-		create_transaction_manager = QuackCreateTransactionManager;
-	}
-};
-
 // pass session id
 static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
 	auto auth_str = args.GetValue(1, 0).GetValue<string>();
@@ -98,21 +70,6 @@ static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector
 
 static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
 	result.SetValue(0, Value(true)); // choose life
-}
-
-static void QuackUriParser(const DataChunk &args, ExpressionState &, Vector &result) {
-	D_ASSERT(args.size() == 2);
-	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
-	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::BOOLEAN);
-	D_ASSERT(result.GetType().id() == LogicalTypeId::STRUCT);
-
-	QuackUri parsed(args.GetValue(0, 0).GetValue<string>(), args.GetValue(1, 0).GetValue<bool>());
-
-	result.SetValue(0, Value::STRUCT({{"host", Value(parsed.Host())},
-	                                  {"port", Value::USMALLINT(parsed.Port())},
-	                                  {"ipv6", Value::BOOLEAN(parsed.IPv6())},
-	                                  {"ssl", Value::BOOLEAN(parsed.Ssl())},
-	                                  {"url", Value(parsed.Http())}}));
 }
 
 static void QuackIdentifyFun(ClientContext &, TableFunctionInput &, DataChunk &) {
@@ -144,37 +101,28 @@ static TableFunction GetQuackIdentifyFunction() {
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
-	loader.SetDescription("Adds support for DuckDB Remote Procedure Calls (RPC)");
+	loader.SetDescription("The DuckDB 'Quack' Client/Server Protocol");
 
 	loader.RegisterFunction(QuackScanFunction::GetFunction());
 	loader.RegisterFunction(QuackScanByNameFunction::GetFunction());
-	loader.RegisterFunction(GetQuackIdentifyFunction());
-
 	loader.RegisterFunction(QuackServeFunction::GetFunction());
 	loader.RegisterFunction(QuackStopFunction::GetFunction());
+	loader.RegisterFunction(GetQuackIdentifyFunction());
 
 	// the default authentication function
-	ScalarFunction rpc_auth_token("rpc_auth_token",
-	                              {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
-	                              LogicalType::BOOLEAN, QuackAuthToken);
-	rpc_auth_token.SetVolatile();
-	loader.RegisterFunction(rpc_auth_token);
+	ScalarFunction quack_check_token("quack_check_token",
+	                                 {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
+	                                 LogicalType::BOOLEAN, QuackAuthToken);
+	quack_check_token.SetVolatile();
+	loader.RegisterFunction(quack_check_token);
 
-	ScalarFunction rpc_authorization("rpc_dummy_authorization",
+	ScalarFunction rpc_authorization("quack_nop_authorization",
 	                                 {/* session id */ LogicalType::VARCHAR, /* query string */ LogicalType::VARCHAR},
 	                                 LogicalType::BOOLEAN, QuackDummyAuthorization);
 	rpc_authorization.SetVolatile();
 	loader.RegisterFunction(rpc_authorization);
 
-	// just for testing
-	ScalarFunction rpc_uri_parser("rpc_uri_parser", {/* uri */ LogicalType::VARCHAR, /* ssl */ LogicalType::BOOLEAN},
-	                              LogicalType::STRUCT({{"host", LogicalType::VARCHAR},
-	                                                   {"port", LogicalType::USMALLINT},
-	                                                   {"ipv6", LogicalType::BOOLEAN},
-	                                                   {"ssl", LogicalType::BOOLEAN},
-	                                                   {"url", LogicalType::VARCHAR}}),
-	                              QuackUriParser);
-	loader.RegisterFunction(rpc_uri_parser);
+	loader.RegisterFunction(QuackParseUriFunction::GetFunction());
 
 	RegisterQuackSecretType(loader);
 
@@ -187,15 +135,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                           ext);
 
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
-	config.AddExtensionOption("rpc_authentication_function", "Name of a callback function for authentication",
-	                          LogicalType::VARCHAR, Value("rpc_auth_token"));
-	config.AddExtensionOption("rpc_authorization_function", "Name of a callback function for authorization",
-	                          LogicalType::VARCHAR, Value("rpc_dummy_authorization"));
-
-	// TODO make this readonly from SQL?
-	config.AddExtensionOption("rpc_default_token", "Authorization token used by default", LogicalType::VARCHAR, Value(),
-	                          nullptr, SetScope::GLOBAL);
-
+	config.AddExtensionOption("quack_authentication_function", "Name of a callback function for authentication",
+	                          LogicalType::VARCHAR, Value("quack_check_token"));
+	config.AddExtensionOption("quack_authorization_function", "Name of a callback function for authorization",
+	                          LogicalType::VARCHAR, Value("quack_nop_authorization"));
 	config.AddExtensionOption("quack_fetch_batch_chunks", "Maximum number of DataChunks returned per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));
 
@@ -205,7 +148,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          Value::BIGINT(Timestamp::GetCurrentTimestamp().value));
 
 	// whoami() identity fields — global settings so they propagate across all sessions
-	// (rpc_call creates fresh server-side sessions that wouldn't see per-connection state).
+	// (quack_query creates fresh server-side sessions that wouldn't see per-connection state).
 	config.AddExtensionOption("whoami_name", "Human-readable name for this node", LogicalType::VARCHAR, Value(""));
 	config.AddExtensionOption("whoami_provider", "Deployment provider (ec2, docker, local, ...)", LogicalType::VARCHAR,
 	                          Value(""));

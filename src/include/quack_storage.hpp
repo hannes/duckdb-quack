@@ -8,6 +8,11 @@ namespace duckdb {
 
 class DatabaseInstance;
 
+class QuackStorageExtension : public StorageExtension {
+public:
+	QuackStorageExtension();
+};
+
 class QuackStorageExtensionInfo : public StorageExtensionInfo {
 public:
 	static QuackStorageExtensionInfo &GetState(const DatabaseInstance &instance);

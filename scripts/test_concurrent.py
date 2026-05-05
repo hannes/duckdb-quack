@@ -33,7 +33,7 @@ def make_connection():
 def setup_server(address):
     conn = make_connection()
     conn.execute("CREATE TABLE test_data AS SELECT i, 'row_' || i AS name FROM range(10000) t(i)")
-    conn.execute(f"CALL rpc_start('{address}')")
+    conn.execute(f"CALL quack_serve('{address}')")
     time.sleep(0.2)
     return conn
 

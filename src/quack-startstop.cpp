@@ -40,9 +40,9 @@ static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunc
 
 	auto &config = DBConfig::GetConfig(context);
 	Value default_auth_val;
-	auto lookup_result_token = config.TryGetCurrentSetting("rpc_authentication_function", default_auth_val);
+	auto lookup_result_token = config.TryGetCurrentSetting("quack_authentication_function", default_auth_val);
 	bind_data->auth_is_default =
-	    lookup_result_token && !default_auth_val.IsNull() && default_auth_val.GetValue<string>() == "rpc_auth_token";
+	    lookup_result_token && !default_auth_val.IsNull() && default_auth_val.GetValue<string>() == "quack_check_token";
 
 	if (bind_data->auth_is_default) {
 		return_types.emplace_back(LogicalType::VARCHAR);
@@ -85,7 +85,7 @@ static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataC
 }
 
 TableFunction QuackServeFunction::GetFunction() {
-	auto fun = TableFunction("rpc_start", {LogicalType::VARCHAR}, QuackServe, QuackServeBind);
+	auto fun = TableFunction("quack_serve", {LogicalType::VARCHAR}, QuackServe, QuackServeBind);
 	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
 	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
 	return fun;

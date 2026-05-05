@@ -12,7 +12,7 @@ statement ok
 set rpc_default_token='asdf'
 
 statement ok con1
-call rpc_start('quack:localhost');
+call quack_serve('quack:localhost');
 
 sleep 100 millisecond
 
@@ -21,9 +21,9 @@ sleep 100 millisecond
 statement ok con2
 CALL enable_logging('RPC');
 
-# rpc_call should produce RPC log entries
+# quack_query should produce RPC log entries
 query I con2
-from rpc_call('quack:localhost', 'select 42 as answer')
+from quack_query('quack:localhost', 'select 42 as answer')
 ----
 42
 
@@ -102,7 +102,7 @@ statement ok con2
 CALL truncate_duckdb_logs();
 
 statement error con2
-from rpc_call('quack:localhost', 'selexxxct 42')
+from quack_query('quack:localhost', 'selexxxct 42')
 ----
 Error
 
@@ -123,7 +123,7 @@ statement ok con2
 CALL enable_logging('HTTP');
 
 query I con2
-from rpc_call('quack:localhost', 'select 1')
+from quack_query('quack:localhost', 'select 1')
 ----
 1
 

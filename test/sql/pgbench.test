@@ -25,7 +25,7 @@ statement ok
 set rpc_default_token='asdf'
 
 statement ok con1
-call rpc_start('quack:localhost');
+call quack_serve('quack:localhost');
 
 statement ok con2
 attach 'quack:localhost' as rpc

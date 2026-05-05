@@ -4,8 +4,6 @@
 
 require quack
 
-require json
-
 require httpfs
 
 set ignore_error_messages __none__
@@ -14,107 +12,109 @@ foreach server 'quack:localhost'
 
 
 statement ok con1
-call rpc_start({server});
-
+call quack_serve({server}, token='asdf');
 
 sleep 100 millisecond
 
+statement ok con2
+create secret quack_ok (type quack, token 'asdf', scope 'quack:localhost')
+
 
 query I con2
-from rpc_call({server}, 'select 42')
+from quack_query({server}, 'select 42')
 ----
 42
 
 # we return the last result set - for now
 query I con2
-from rpc_call({server}, 'select 42; select 43')
+from quack_query({server}, 'select 42; select 43')
 ----
 42
 
 query I con2
-from rpc_call({server}, 'set variable x=44; select getvariable(''x'')')
+from quack_query({server}, 'set variable x=44; select getvariable(''x'')')
 ----
 44
 
 # we can run whole goddamn transactions in here
 query I con2
-from rpc_call({server}, 'create table fuu2 (i integer); begin transaction; insert into fuu2 values(45); rollback; from fuu2')
+from quack_query({server}, 'create table fuu2 (i integer); begin transaction; insert into fuu2 values(45); rollback; from fuu2')
 ----
 
 
 statement error con2
-from rpc_call({server}, '')
-----
-Error
-
-
-statement error con2
-from rpc_call({server}, NULL)
+from quack_query({server}, '')
 ----
 Error
 
 
 statement error con2
-from rpc_call({server}, 'selexxxct 42')
+from quack_query({server}, NULL)
+----
+Error
+
+
+statement error con2
+from quack_query({server}, 'selexxxct 42')
 ----
 Error
 
 query I con2
-select max(range) from rpc_call({server}, 'from range(100000)')
+select max(range) from quack_query({server}, 'from range(100000)')
 ----
 99999
 
 statement ok con2
-from rpc_call({server}, 'from test_all_types()')
+from quack_query({server}, 'from test_all_types()')
 
 
 statement ok con2
-from rpc_call({server}, 'create table fuu(i integer)')
+from quack_query({server}, 'create table fuu(i integer)')
 
 statement ok con2
-from rpc_call({server}, 'insert into fuu values (42)')
+from quack_query({server}, 'insert into fuu values (42)')
 
 query I ok con2
-from rpc_call({server}, 'from fuu')
+from quack_query({server}, 'from fuu')
 ----
 42
 
 statement error con2
-from rpc_call({server}, 'from yyyy')
+from quack_query({server}, 'from yyyy')
 ----
 does not exist
 
 statement ok con2
-from rpc_call({server}, 'drop table fuu')
+from quack_query({server}, 'drop table fuu')
 
 # some error cases
 statement error con2
-from rpc_call({server}, NULL)
+from quack_query({server}, NULL)
 ----
 cannot be NULL
 
 statement error con2
-from rpc_call(NULL, '')
+from quack_query(NULL, '')
 ----
 cannot be NULL
 
 statement error con1
-call rpc_start()
+call quack_serve()
 ----
 Binder Error
 
 statement error con1
-call rpc_start('')
+call quack_serve('')
 ----
 Invalid listen string
 
 statement error con1
-call rpc_start(NULL)
+call quack_serve(NULL)
 ----
 Invalid listen string
 
 statement ok con2
-from rpc_call({server}, 'select 42')
+from quack_query({server}, 'select 42')
 
 statement ok con 1
 call rpc_stop({server})
@@ -123,7 +123,7 @@ statement ok con 1
 call rpc_stop({server})
 
 statement error con2
-from rpc_call({server}, 'select 42')
+from quack_query({server}, 'select 42')
 ----
 IO Error
 

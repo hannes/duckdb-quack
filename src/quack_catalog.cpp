@@ -334,7 +334,7 @@ TableStorageInfo QuackTableCatalogEntry::GetStorageInfo(ClientContext &context) 
 
 // clang-format off
 static const DefaultTableMacro quack_table_macros[] = {
-	{DEFAULT_SCHEMA, "call", {"remote_sql_query", nullptr}, {{nullptr, nullptr}},  "FROM rpc_call_by_name({CATALOG}, remote_sql_query)"},
+	{DEFAULT_SCHEMA, "call", {"remote_sql_query", nullptr}, {{nullptr, nullptr}},  "FROM quack_query_by_name({CATALOG}, remote_sql_query)"},
 	{nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
 };
 // clang-format on
