@@ -272,9 +272,24 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 	}
 
 	case MessageType::APPEND_REQUEST: {
-		// TODO authorize this
 		auto &append_request_message = received_message.Cast<AppendRequestMessage>();
 		optional_ptr<QuackConnection> connection = GetConnection(append_request_message.ConnectionId());
+		if (!connection) {
+			return make_uniq<ErrorMessage>("Invalid connection id");
+		}
+
+		// we never execute this query, but throw it at the authorization function so it can check if this user gets to
+		// insert into this table
+		auto dummy_insert_query = "INSERT INTO " + append_request_message.SchemaName() + "." +
+		                          append_request_message.TableName() + " VALUES (NULL)";
+
+		// TODO do not do this if there is no fun set
+		if (!EvaluateAuthQuery(
+		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authorization_function")),
+		        Value(append_request_message.ConnectionId()), Value(dummy_insert_query))) {
+			return make_uniq<ErrorMessage>("Authorization failed");
+		}
+
 		std::unique_lock<std::mutex> lock(connection->lock);
 		auto &context = *connection->duckdb_connection->context;
 		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());
