@@ -9,7 +9,7 @@ print('method\tthreads\trows\tmedian_time_seconds')
 
 for duckdb_socket in ['quack:localhost']:
 #, '/tmp/duckdb-rpc-socket']:
-	server = subprocess.Popen([duckdb_binary, '-init', '/dev/null', '-cmd', f"set rpc_default_token='asdf'; CALL rpc_start('{duckdb_socket}')",  '-readonly', '~/nobackup/tpch-sf100.db'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+	server = subprocess.Popen([duckdb_binary, '-init', '/dev/null', '-cmd', f"set rpc_default_token='asdf'; CALL quack_serve('{duckdb_socket}')",  '-readonly', '~/nobackup/tpch-sf100.db'], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
 	# wait for socket to actually be open
 	time.sleep(1)
 	for threads in [8, 1,2,4]:
@@ -17,7 +17,7 @@ for duckdb_socket in ['quack:localhost']:
 			timings = []
 			for rep in range(3):
 				start = time.time()
-				client = subprocess.run([duckdb_binary,  '-init', '/dev/null',  '-c', f"set rpc_default_token='asdf'; SET enable_progress_bar = false; set threads={threads}; EXPLAIN ANALYZE FROM rpc_call('{duckdb_socket}','FROM lineitem LIMIT {rows}');"], stdout=subprocess.PIPE)
+				client = subprocess.run([duckdb_binary,  '-init', '/dev/null',  '-c', f"set rpc_default_token='asdf'; SET enable_progress_bar = false; set threads={threads}; EXPLAIN ANALYZE FROM quack_query('{duckdb_socket}','FROM lineitem LIMIT {rows}');"], stdout=subprocess.PIPE)
 				timings.append(time.time() - start)
 			median_time = round(statistics.median(timings), 3)
 			print(f'{duckdb_socket}\t{threads}\t{rows}\t{median_time}')

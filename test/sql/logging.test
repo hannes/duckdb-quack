@@ -107,7 +107,7 @@ from quack_query('quack:localhost', 'selexxxct 42')
 Error
 
 query I con2
-select count(*) > 0 from duckdb_logs_parsed('Quack') where response_type = 'ERROR' and error is not null
+select count(*) > 0 from duckdb_logs_parsed('Quack') where response_type = 'ERROR_RESPONSE' and error is not null
 ----
 true
 
