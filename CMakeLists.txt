@@ -13,7 +13,7 @@ project(${TARGET_NAME})
 include_directories(src/include duckdb/third_party/httplib duckdb/extension/autocomplete/include)
 
 set(EXTENSION_SOURCES
-        src/quack-start_stop.cpp   src/quack_extension.cpp   src/quack_log.cpp         src/quack_server.cpp
+        src/quack_start_stop.cpp   src/quack_extension.cpp   src/quack_log.cpp         src/quack_server.cpp
         src/quack_catalog.cpp     src/quack_http_server.cpp src/quack_message.cpp     src/quack_storage.cpp
         src/quack_client.cpp      src/quack_insert.cpp      src/quack_scan.cpp src/quack_uri.cpp src/serialize_quack_message.cpp
 )
