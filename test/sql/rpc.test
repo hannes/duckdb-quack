@@ -24,6 +24,12 @@ from quack_query({server}, 'select 42', token='asdf')
 ----
 42
 
+# we fail with the wrong token
+statement error con2
+from quack_query({server}, 'select 42', token='fdsa')
+----
+Authentication failed
+
 # or a secret
 statement ok con2
 create secret (type quack, token 'asdf')

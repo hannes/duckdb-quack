@@ -15,7 +15,8 @@
 
 using namespace duckdb;
 
-QuackServer::QuackServer(ClientContext &context_p, const string &token_p) : db(context_p.db), token(token_p) {
+QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
+    : db(context_p.db), uri(uri_p), token(token_p) {
 }
 
 QuackServer::~QuackServer() {
@@ -181,8 +182,8 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
 		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authentication_function")),
-		        Value(session_id), Value(connection_request_message.AuthString()))) {
+		        *db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(*db, "quack_authentication_function")),
+		        Value(session_id), Value(connection_request_message.AuthString()), Value(Token()))) {
 			return make_uniq<ErrorMessage>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));

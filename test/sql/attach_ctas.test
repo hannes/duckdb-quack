@@ -10,16 +10,11 @@ set ignore_error_messages __none__
 
 foreach server 'quack:localhost'
 
-
-statement ok
-set rpc_default_token='asdf'
-
-
 statement ok con1
-call quack_serve({server});
+call quack_serve({server}, token='asdf');
 
 statement ok con2
-attach {server} as rpc
+attach {server} as rpc (token 'asdf')
 
 statement ok
 create table rpc.t as select range a from range(10);

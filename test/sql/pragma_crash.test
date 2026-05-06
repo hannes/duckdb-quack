@@ -8,15 +8,12 @@ require httpfs
 
 set ignore_error_messages __none__
 
-statement ok
-set rpc_default_token='1234'
-
 foreach server 'quack:localhost:20118'
 
 foreach ssl true
 
 statement ok con1
-call quack_serve({server});
+call quack_serve({server}, token='1234');
 
 statement ok con2
 create or replace secret q2 (TYPE quack, SCOPE {server}, TOKEN '1234');

@@ -21,11 +21,12 @@ CREATE TABLE pgbench_history(tid INTEGER, bid INTEGER, aid INTEGER, delta INTEGE
 statement ok con1
 CREATE TABLE pgbench_tellers(tid INTEGER, bid INTEGER, tbalance INTEGER, filler VARCHAR);
 
-statement ok
-set rpc_default_token='asdf'
-
 statement ok con1
-call quack_serve('quack:localhost');
+call quack_serve('quack:localhost', token='asdf');
+
+
+statement ok con2
+create secret (type quack, token 'asdf')
 
 statement ok con2
 attach 'quack:localhost' as rpc

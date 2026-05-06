@@ -8,13 +8,16 @@ require httpfs
 
 set ignore_error_messages __none__
 
-statement ok
-set rpc_default_token='asdf'
 
 statement ok con1
-call quack_serve('quack:localhost');
+call quack_serve('quack:localhost', token='asdf');
 
 sleep 100 millisecond
+
+
+statement ok con2
+create secret (type quack, token 'asdf')
+
 
 # --- RPC logging ---
 

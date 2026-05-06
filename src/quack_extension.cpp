@@ -58,19 +58,10 @@ static void RegisterQuackSecretType(ExtensionLoader &loader) {
 
 // pass session id
 static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
-	auto auth_str = args.GetValue(1, 0).GetValue<string>();
+	auto client_token = args.GetValue(1, 0).GetValue<string>();
+	auto server_token = args.GetValue(2, 0).GetValue<string>();
 
-	auto &quack_state = QuackStorageExtensionInfo::GetState(*state.GetContext().db);
-	//
-	// auto lookup_result = config.TryGetCurrentSetting("rpc_default_token", default_token_val);
-	// D_ASSERT(lookup_result);
-	// D_ASSERT(!default_token_val.IsNull());
-	// D_ASSERT(default_token_val.type().id() == LogicalTypeId::VARCHAR);
-	// auto default_token = default_token_val.GetValue<string>();
-
-	// result.SetValue(0, Value(auth_str == default_token));
-
-	result.SetValue(0, Value::BOOLEAN(true));
+	result.SetValue(0, Value::BOOLEAN(server_token == client_token));
 }
 
 static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
@@ -116,7 +107,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// the default authentication function
 	ScalarFunction quack_check_token("quack_check_token",
-	                                 {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR},
+	                                 {/* session id */ LogicalType::VARCHAR, /* auth string */ LogicalType::VARCHAR,
+	                                  /* token */ LogicalType::VARCHAR},
 	                                 LogicalType::BOOLEAN, QuackAuthToken);
 	quack_check_token.SetVolatile();
 	loader.RegisterFunction(quack_check_token);

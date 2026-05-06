@@ -33,7 +33,8 @@ void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen
 	server->server->listen(listen_host, listen_port);
 }
 
-void HttpQuackServer::Listen(const QuackUri &uri) {
+HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
+    : QuackServer(context_p, uri_p, token_p) {
 	server = make_uniq<duckdb_httplib::Server>();
 
 	// Each keep-alive connection holds a server thread for its lifetime.
@@ -73,8 +74,8 @@ void HttpQuackServer::Listen(const QuackUri &uri) {
 	});
 
 	if (!server->is_valid()) {
-		throw IOException("Failed to instantiate DuckDB server at %s / %s", uri.Uri(), uri.Http());
+		throw IOException("Failed to instantiate DuckDB server at %s / %s", uri_p.Uri(), uri_p.Http());
 	}
 
-	listen_threads.push_back(std::thread(ListenThread, this, uri.Host(), uri.Port()));
+	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), uri_p.Port()));
 }

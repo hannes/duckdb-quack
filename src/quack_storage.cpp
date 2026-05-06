@@ -25,8 +25,7 @@ QuackServer &QuackStorageExtensionInfo::CreateServer(ClientContext &context, con
 		throw InvalidInputException("Server already exists for %s", listen_uri.Uri());
 	}
 	unique_ptr<QuackServer> server;
-	server = make_uniq<HttpQuackServer>(context, token);
-	server->Listen(listen_uri);
+	server = make_uniq<HttpQuackServer>(context, listen_uri, token);
 	servers.emplace(listen_uri.Uri(), std::move(server));
 	return *servers[listen_uri.Uri()];
 }

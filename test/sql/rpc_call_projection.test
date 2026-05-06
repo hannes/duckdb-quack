@@ -9,7 +9,10 @@ require httpfs
 set ignore_error_messages __none__
 
 statement ok con1
-call quack_serve('quack:localhost');
+call quack_serve('quack:localhost', token='asdf');
+
+statement ok con2
+create secret (type quack, token 'asdf')
 
 # Pick the non-first column — exercises the column_ids remap in RpcScan.
 query I con2
