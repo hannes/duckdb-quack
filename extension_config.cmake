@@ -3,9 +3,13 @@
 # Extension from this repo
 duckdb_extension_load(quack
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}
-    LOAD_TESTS
 )
 
 # Any extra extensions that should be built
 duckdb_extension_load(json)
 duckdb_extension_load(autocomplete)
+
+duckdb_extension_load(httpfs
+    GIT_URL https://github.com/duckdb/duckdb-httpfs
+    GIT_TAG 13e18b3c9f3810334f5972b76a3acc247b28e537
+)
