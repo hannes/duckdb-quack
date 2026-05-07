@@ -31,7 +31,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 
 	auto bind_data = make_uniq<QuackScanBindData>();
 	bind_data->server_uri = QuackUri(initial_uri.Uri(), enable_ssl);
-	bind_data->initial_client = QuackClient::GetClient(context, bind_data->server_uri);
+	auto initial_client = QuackClient::GetClient(context, bind_data->server_uri);
 
 	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
 	// global rpc_default_token setting. Mirrors the logic in QuackCatalog::QuackCatalog.
@@ -55,10 +55,10 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	}
 
 	auto connection_request_response =
-	    bind_data->initial_client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
+	    initial_client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
-	auto bind_response = bind_data->initial_client->Request<PrepareResponseMessage>(
+	auto bind_response = initial_client->Request<PrepareResponseMessage>(
 	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
@@ -66,6 +66,9 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+
+	// store the initial client for later re-use
+	bind_data->SetInitialClient(std::move(initial_client));
 
 	return bind_data;
 }
@@ -112,7 +115,6 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	// new stuff
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
-
 	return bind_data;
 }
 
@@ -133,9 +135,11 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 };
 
 struct QuackScanGlobalState : GlobalTableFunctionState {
-	explicit QuackScanGlobalState(vector<column_t> column_ids_p, vector<idx_t> projection_id_p, bool needs_more_fetch_p)
-	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(column_ids_p), projection_ids(projection_id_p),
-	      needs_more_fetch(needs_more_fetch_p) {
+	explicit QuackScanGlobalState(vector<column_t> column_ids_p, vector<idx_t> projection_id_p,
+	                              vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p)
+	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(std::move(column_ids_p)),
+	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p),
+	      results(std::move(results_p)) {
 	}
 	idx_t MaxThreads() const override {
 		return max_threads;
@@ -144,6 +148,15 @@ struct QuackScanGlobalState : GlobalTableFunctionState {
 	vector<column_t> column_ids;
 	vector<idx_t> projection_ids;
 	atomic<bool> needs_more_fetch;
+
+	vector<unique_ptr<DataChunkWrapper>> TryGetResults() {
+		lock_guard<mutex> guard(lock);
+		return std::move(results);
+	}
+
+private:
+	mutex lock;
+	vector<unique_ptr<DataChunkWrapper>> results;
 };
 
 static bool CanPushdownFilter(const TableFilter &filter) {
@@ -204,7 +217,7 @@ static string BuildPushdownQuery(const QuackScanBindData &bind_data, const Table
 	// 		query = "SELECT " + StringUtil::Join(selected_columns, ", ") + " ";
 	// 	}
 	// }
-	query += StringUtil::Format("FROM %s", bind_data.table_name);
+	query += StringUtil::Format("FROM %s", SQLIdentifier(bind_data.table_name));
 	//
 	// // Filters: build WHERE clause from pushable filters
 	// if (input.filters) {
@@ -230,43 +243,46 @@ static string BuildPushdownQuery(const QuackScanBindData &bind_data, const Table
 }
 
 unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context, TableFunctionInitInput &input) {
-	auto &bind_data = input.bind_data->CastNoConst<QuackScanBindData>();
+	auto &bind_data = input.bind_data->Cast<QuackScanBindData>();
 
 	// For the catalog path (ATTACH), LookupEntry only prepares without executing
 	// to avoid the server-side result being overwritten by subsequent lookups.
 	// We execute the query here, right before scanning, so the result is fresh.
-
+	vector<unique_ptr<DataChunkWrapper>> results;
+	bool needs_more_fetch = bind_data.needs_more_fetch;
 	if (!bind_data.table_name.empty()) {
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = QuackClient::GetClient(context, bind_data.server_uri);
 		auto response_message =
 		    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query));
-		bind_data.needs_more_fetch = response_message->NeedsMoreFetch();
-		bind_data.results = std::move(response_message->MutableResults());
+		needs_more_fetch = response_message->NeedsMoreFetch();
+		results = std::move(response_message->MutableResults());
+	} else {
+		for (auto &chunk_ref : bind_data.results) {
+			auto &chunk = chunk_ref->Chunk();
+			results.push_back(make_uniq<DataChunkWrapper>(chunk));
+		}
 	}
 
 	// we only multithread if there is more to fetch
-	return make_uniq<QuackScanGlobalState>(input.column_ids, input.projection_ids, bind_data.needs_more_fetch);
+	return make_uniq<QuackScanGlobalState>(input.column_ids, input.projection_ids, std::move(results),
+	                                       needs_more_fetch);
 }
 
 unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context, TableFunctionInitInput &input,
                                                        GlobalTableFunctionState *global_state_p) {
-	auto &bind_data = input.bind_data->CastNoConst<QuackScanBindData>();
-	lock_guard<mutex> guard(bind_data.lock);
-
+	auto &bind_data = input.bind_data->Cast<QuackScanBindData>();
+	auto &global_state = global_state_p->Cast<QuackScanGlobalState>();
 	auto local_state = make_uniq<QuackScanLocalState>();
+
 	// re-use initial client from bind if possible
-	if (bind_data.initial_client) {
-		local_state->client = std::move(bind_data.initial_client);
-	} else {
+	local_state->client = bind_data.TryGetInitialClient();
+	if (!local_state->client) {
 		local_state->client = QuackClient::GetClient(context.client, bind_data.server_uri);
 	}
-
-	if (!bind_data.results.empty()) {
-		for (auto &chunk : bind_data.results) {
-			local_state->results.push(std::move(chunk));
-		}
-		bind_data.results.clear();
+	auto results = global_state.TryGetResults();
+	for (auto &chunk : results) {
+		local_state->results.push(std::move(chunk));
 	}
 	return local_state;
 }
