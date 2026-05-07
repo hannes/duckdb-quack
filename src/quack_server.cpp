@@ -134,12 +134,10 @@ bool ServerSupportsMessage(MessageType type) {
 
 bool MessageRequiresConnection(MessageType type) {
 	switch (type) {
-	case MessageType::PREPARE_REQUEST:
-	case MessageType::FETCH_REQUEST:
-	case MessageType::APPEND_REQUEST:
-		return true;
-	default:
+	case MessageType::CONNECTION_REQUEST:
 		return false;
+	default:
+		return true;
 	}
 }
 
