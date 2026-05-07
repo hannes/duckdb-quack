@@ -65,6 +65,15 @@ public:
 		return token;
 	}
 
+	const QuackUri &ListenUri() const {
+		return uri;
+	}
+
+	idx_t ActiveConnectionCount() {
+		std::lock_guard<std::mutex> lock(active_connections_mutex);
+		return active_connections.size();
+	}
+
 protected:
 	unique_ptr<QuackMessage> HandleMessage(MemoryStream &read_stream);
 	unique_ptr<QuackMessage> HandleMessageInternal(DatabaseInstance &db, QuackMessage &received_message,
@@ -102,6 +111,5 @@ private:
 	unique_ptr<duckdb_httplib::Server> server;
 	bool is_running = false;
 };
-;
 
 } // namespace duckdb
