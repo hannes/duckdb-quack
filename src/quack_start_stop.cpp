@@ -49,8 +49,9 @@ static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunc
 		if (input.named_parameters.find("token") != input.named_parameters.end()) {
 			bind_data->token = input.named_parameters["token"].GetValue<string>();
 		} else {
-			// TODO
+			bind_data->token = QuackServer::GenerateRandomToken(*context.db);
 		}
+		QuackServer::ValidateToken(bind_data->token);
 		return_types.emplace_back(LogicalType::VARCHAR);
 		names.emplace_back("auth_token");
 	}

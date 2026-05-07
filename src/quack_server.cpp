@@ -16,8 +16,15 @@
 
 using namespace duckdb;
 
+void QuackServer::ValidateToken(const string &token) {
+	if (token.size() < 4) {
+		throw InvalidInputException("Quack server token must be at least 4 characters long");
+	}
+}
+
 QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
     : db(context_p.db), uri(uri_p), token(token_p) {
+	ValidateToken(token);
 }
 
 QuackServer::~QuackServer() {
@@ -71,28 +78,42 @@ static bool EvaluateAuthQuery(DatabaseInstance &db, const string &sql, ARGS... v
 	return true;
 }
 
-string QuackServer::GenerateSessionId() {
-	constexpr idx_t kSessionIdBytes = 16; // 128 bits
+static constexpr idx_t kTokenBytes = 16; // 128 bits
 
+static string HexEncode(const data_t *bytes, idx_t n) {
+	string result(n * 2, '\0');
+	for (idx_t i = 0; i < n; i++) {
+		result[2 * i] = Blob::HEX_TABLE[bytes[i] >> 4];
+		result[2 * i + 1] = Blob::HEX_TABLE[bytes[i] & 0x0F];
+	}
+	return result;
+}
+
+string QuackServer::GenerateRandomToken(DatabaseInstance &db) {
+	auto encryption_util = db.GetEncryptionUtil(false);
+	auto metadata = make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kTokenBytes,
+	                                                   EncryptionTypes::EncryptionVersion::NONE);
+	auto rng = encryption_util->CreateEncryptionState(std::move(metadata));
+
+	data_t bytes[kTokenBytes];
+	rng->GenerateRandomData(bytes, kTokenBytes);
+	return HexEncode(bytes, kTokenBytes);
+}
+
+string QuackServer::GenerateSessionId() {
 	{
 		std::lock_guard<std::mutex> lock(session_id_rng_mutex);
 		if (!session_id_rng) {
 			auto encryption_util = db->GetEncryptionUtil(false);
-			auto metadata = make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kSessionIdBytes,
+			auto metadata = make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kTokenBytes,
 			                                                   EncryptionTypes::EncryptionVersion::NONE);
 			session_id_rng = encryption_util->CreateEncryptionState(std::move(metadata));
 		}
 	}
 
-	data_t bytes[kSessionIdBytes];
-	session_id_rng->GenerateRandomData(bytes, kSessionIdBytes);
-
-	string result(kSessionIdBytes * 2, '\0');
-	for (idx_t i = 0; i < kSessionIdBytes; i++) {
-		result[2 * i] = Blob::HEX_TABLE[bytes[i] >> 4];
-		result[2 * i + 1] = Blob::HEX_TABLE[bytes[i] & 0x0F];
-	}
-	return result;
+	data_t bytes[kTokenBytes];
+	session_id_rng->GenerateRandomData(bytes, kTokenBytes);
+	return HexEncode(bytes, kTokenBytes);
 }
 
 // Extract connection_id from a message if available
