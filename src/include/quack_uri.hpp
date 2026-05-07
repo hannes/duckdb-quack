@@ -17,6 +17,10 @@ public:
 	string Uri() const {
 		return uri;
 	}
+	//! Fully-qualified canonical form, always `quack:<host>:<port>`
+	string CanonicalUri() const {
+		return "quack:" + host + ":" + std::to_string(port);
+	}
 	string Host() const {
 		return host;
 	}
