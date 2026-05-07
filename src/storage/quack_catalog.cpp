@@ -99,15 +99,12 @@ const string &QuackCatalog::GetConnectionId() {
 }
 
 optional_ptr<CatalogEntry> QuackCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
-	throw InternalException("FIXME: create schema");
-	// auto create_schema_info = info.Copy();
-	// // TODO this does not make too much sense?
-	// create_schema_info->catalog = "memory";
-	//
-	// auto create_request = make_uniq<PrepareRequestMessage>(GetConnectionId(), create_schema_info->ToString());
-	// auto create_respose = GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
-	// return make_uniq_base<CatalogEntry, QuackSchemaCatalogEntry>(*this,
-	// create_schema_info->Cast<CreateSchemaInfo>()); return nullptr;
+	auto &quack_transaction = QuackTransaction::Get(transaction);
+	// create schema remotely
+	quack_transaction.Query(info.ToString());
+	// register schema locally
+	auto schema_entry = make_uniq<QuackSchemaCatalogEntry>(*this, info);
+	return schemas->CreateEntry(std::move(schema_entry), info.on_conflict);
 }
 
 void QuackCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {

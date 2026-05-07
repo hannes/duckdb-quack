@@ -44,7 +44,6 @@ unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &conte
 	auto &quack_catalog = quack_schema.catalog.Cast<QuackCatalog>();
 
 	auto entry = quack_schema.CreateTable(CatalogTransaction(quack_catalog, context), *info);
-	;
 	return make_uniq<QuackInsertGlobalState>(entry->Cast<QuackTableCatalogEntry>());
 }
 
