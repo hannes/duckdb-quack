@@ -196,3 +196,67 @@ FROM quack_query('quack:localhost', 'select 42', token='asdf');
 
 statement ok con1
 CALL quack_stop('quack:localhost');
+
+####################
+# Combined: custom authn + custom authz, server starts with a long token.
+# Regression: previously the token= parameter was silently dropped when
+# quack_authentication_function != quack_check_token, then the empty token
+# tripped ValidateToken with "must be at least 4 characters."
+####################
+
+statement ok con1
+CREATE MACRO check_token(sid, auth_string, token) AS auth_string = token;
+
+statement ok con1
+CREATE MACRO read_only(sid, query) AS regexp_matches(upper(ltrim(query)), '^(SELECT|PRAGMA|CALL|EXPLAIN|DESCRIBE|SHOW)\b');
+
+statement ok con1
+SET GLOBAL quack_authentication_function = 'check_token';
+
+statement ok con1
+SET GLOBAL quack_authorization_function = 'read_only';
+
+query III con1
+CALL quack_serve('quack:localhost', token => 'analytics-team-token');
+----
+quack:localhost	http://localhost:9494	analytics-team-token
+
+sleep 100 millisecond
+
+# Authn happy path with the configured token
+query I con2
+FROM quack_query('quack:localhost', 'select 42', token => 'analytics-team-token');
+----
+42
+
+# Authn rejects wrong token
+statement error con2
+FROM quack_query('quack:localhost', 'select 42', token => 'wrong-token');
+----
+Authentication failed
+
+# Authz allows SELECT
+query I con2
+FROM quack_query('quack:localhost', 'select 1+1', token => 'analytics-team-token');
+----
+2
+
+# Authz blocks writes
+statement error con2
+FROM quack_query('quack:localhost', 'CREATE TABLE t(x INT)', token => 'analytics-team-token');
+----
+Authorization failed
+
+statement error con2
+FROM quack_query('quack:localhost', 'INSERT INTO t VALUES (1)', token => 'analytics-team-token');
+----
+Authorization failed
+
+statement ok con1
+RESET GLOBAL quack_authentication_function;
+
+statement ok con1
+RESET GLOBAL quack_authorization_function;
+
+statement ok con1
+CALL quack_stop('quack:localhost');

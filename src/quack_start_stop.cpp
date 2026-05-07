@@ -10,7 +10,6 @@ struct QuackStartStopFunctionData : public TableFunctionData {
 	}
 
 	bool finished = false;
-	bool auth_is_default = false;
 	QuackUri listen_uri;
 	string token;
 };
@@ -36,25 +35,22 @@ static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunc
 
 	return_types.emplace_back(LogicalType::VARCHAR);
 	return_types.emplace_back(LogicalType::VARCHAR);
+	return_types.emplace_back(LogicalType::VARCHAR);
 	names.emplace_back("listen_uri");
 	names.emplace_back("listen_url");
+	names.emplace_back("auth_token");
 
-	auto &config = DBConfig::GetConfig(context);
-	Value default_auth_val;
-	auto lookup_result_token = config.TryGetCurrentSetting("quack_authentication_function", default_auth_val);
-	bind_data->auth_is_default =
-	    lookup_result_token && !default_auth_val.IsNull() && default_auth_val.GetValue<string>() == "quack_check_token";
-
-	if (bind_data->auth_is_default) {
-		if (input.named_parameters.find("token") != input.named_parameters.end()) {
-			bind_data->token = input.named_parameters["token"].GetValue<string>();
-		} else {
-			bind_data->token = QuackServer::GenerateRandomToken(*context.db);
-		}
-		QuackServer::ValidateToken(bind_data->token);
-		return_types.emplace_back(LogicalType::VARCHAR);
-		names.emplace_back("auth_token");
+	// Every server has a token: either user-supplied or auto-generated. The
+	// authn callback (default token-check or a user-defined function) decides
+	// what to do with it; the server itself doesn't care which path is in use.
+	if (input.named_parameters.find("token") != input.named_parameters.end()) {
+		bind_data->token = input.named_parameters["token"].GetValue<string>();
+	} else {
+		bind_data->token = QuackServer::GenerateRandomToken(*context.db);
 	}
+	// Validate at bind-time: a length error here fails before the listener
+	// thread is spawned, instead of leaving a half-built server behind.
+	QuackServer::ValidateToken(bind_data->token);
 
 	return std::move(bind_data);
 }
@@ -69,9 +65,7 @@ static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataC
 	    QuackStorageExtensionInfo::GetState(*context.db).CreateServer(context, bind_data.listen_uri, bind_data.token);
 	output.SetValue(0, 0, bind_data.listen_uri.Uri());
 	output.SetValue(1, 0, bind_data.listen_uri.Http());
-	if (bind_data.auth_is_default) {
-		output.SetValue(2, 0, bind_data.token);
-	}
+	output.SetValue(2, 0, bind_data.token);
 
 	output.SetCardinality(1);
 	bind_data.finished = true;
