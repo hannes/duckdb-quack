@@ -23,7 +23,6 @@ class EncryptionState;
 struct QuackConnection {
 	mutex lock;
 	unique_ptr<Connection> duckdb_connection;
-	//	unordered_map<string, std::pair<unique_ptr<PreparedStatement>, unique_ptr<QueryResult>>> duckdb_statements;
 	unique_ptr<QueryResult> duckdb_query_result;
 	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
 	idx_t next_batch_index = 0;
@@ -64,13 +63,13 @@ public:
 
 protected:
 	unique_ptr<QuackMessage> HandleMessage(MemoryStream &read_stream);
-	unique_ptr<QuackMessage> HandleMessageInternal(QuackMessage &received_message,
+	unique_ptr<QuackMessage> HandleMessageInternal(DatabaseInstance &db, QuackMessage &received_message,
 	                                               optional_ptr<QuackConnection> connection);
 
 protected:
 	std::vector<std::thread> listen_threads;
 
-	shared_ptr<DatabaseInstance> db;
+	weak_ptr<DatabaseInstance> db_ptr;
 	mutex active_connections_mutex;
 	unordered_map<string, unique_ptr<QuackConnection>> active_connections;
 
