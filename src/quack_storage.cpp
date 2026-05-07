@@ -43,17 +43,9 @@ bool QuackStorageExtensionInfo::StopServer(ClientContext &context, const QuackUr
 		to_destroy = std::move(it->second);
 		servers.erase(it);
 	}
-	// Synchronously free the listening port so that clients racing a subsequent
-	// connect() after quack_stop observe a real refusal rather than a stale socket.
-	// Synchronously close the listening socket so the port is free immediately
-	// (callers racing a subsequent connect() see a real refusal, not a stale
-	// listener). The full teardown (joining listener thread + httplib worker
-	// pool) happens off-thread below — that join cannot run on the worker
-	// that's currently executing this very stop request, because the listener's
-	// exit path joins all workers and would deadlock.
+	// Synchronously free the listening port
 	to_destroy->StopAccepting();
-	// Full destruction (httplib worker-pool join) runs off-thread so that when
-	// quack_stop is invoked from inside one of the server's own worker threads
+	// Full destruction (httplib worker-pool join) runs off-thread
 	std::thread([srv = std::move(to_destroy)]() mutable { srv.reset(); }).detach();
 	return true;
 }

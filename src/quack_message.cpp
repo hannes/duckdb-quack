@@ -86,10 +86,12 @@ void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
 	BinarySerializer serializer(write_stream, options);
 
-	serializer.Begin();
 	// write the header
+	serializer.Begin();
 	header.Serialize(serializer);
+	serializer.End();
 	// write the body
+	serializer.Begin();
 	Serialize(serializer);
 	serializer.End();
 }
@@ -119,19 +121,30 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, M
 	}
 }
 
+MessageHeader QuackMessage::DeserializeHeader(BinaryDeserializer &deserializer) {
+	deserializer.Begin();
+	auto header = MessageHeader::Deserialize(deserializer);
+	deserializer.End();
+	return header;
+}
+
+unique_ptr<QuackMessage> QuackMessage::DeserializeMessage(BinaryDeserializer &deserializer, MessageHeader header) {
+	// read the body
+	deserializer.Begin();
+	auto result = Deserialize(deserializer, header.type);
+	result->SetHeader(std::move(header));
+	deserializer.End();
+	return result;
+}
+
 unique_ptr<QuackMessage> QuackMessage::FromMemoryStream(MemoryStream &read_stream) {
 	read_stream.Rewind();
 	BinaryDeserializer deserializer(read_stream);
 
-	deserializer.Begin();
 	// read the header
-	auto header = MessageHeader::Deserialize(deserializer);
-	// read the body
-	auto result = Deserialize(deserializer, header.type);
-	result->SetHeader(std::move(header));
-	deserializer.End();
-
-	return result;
+	auto header = DeserializeHeader(deserializer);
+	// read the message
+	return DeserializeMessage(deserializer, std::move(header));
 }
 
 void DataChunkWrapper::Serialize(Serializer &serializer) const {

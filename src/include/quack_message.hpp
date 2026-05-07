@@ -79,6 +79,8 @@ public:
 
 	virtual void Serialize(Serializer &serializer) const = 0;
 	static unique_ptr<QuackMessage> Deserialize(Deserializer &deserializer, MessageType message_type);
+	static MessageHeader DeserializeHeader(BinaryDeserializer &deserializer);
+	static unique_ptr<QuackMessage> DeserializeMessage(BinaryDeserializer &deserializer, MessageHeader header);
 
 	const MessageType &Type() const {
 		return header.type;
@@ -255,20 +257,6 @@ private:
 	vector<unique_ptr<DataChunkWrapper>> results;
 	optional_idx batch_index;
 };
-
-// orrr
-static unique_ptr<ParseInfo> ParseInfoCopy(ParseInfo &parse_info) {
-	switch (parse_info.info_type) {
-	case ParseInfoType::CREATE_INFO: {
-		return std::move(parse_info.Cast<CreateInfo>().Copy());
-	}
-	case ParseInfoType::DROP_INFO: {
-		return std::move(parse_info.Cast<DropInfo>().Copy());
-	}
-	default:
-		throw NotImplementedException("Unsupported ParseInfoType");
-	}
-}
 
 class AppendRequestMessage : public QuackMessage {
 public:

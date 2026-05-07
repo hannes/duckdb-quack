@@ -91,8 +91,8 @@ static string HexEncode(const data_t *bytes, idx_t n) {
 
 string QuackServer::GenerateRandomToken(DatabaseInstance &db) {
 	auto encryption_util = db.GetEncryptionUtil(false);
-	auto metadata = make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kTokenBytes,
-	                                                   EncryptionTypes::EncryptionVersion::NONE);
+	auto metadata =
+	    make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kTokenBytes, EncryptionTypes::EncryptionVersion::NONE);
 	auto rng = encryption_util->CreateEncryptionState(std::move(metadata));
 
 	data_t bytes[kTokenBytes];
@@ -114,24 +114,6 @@ string QuackServer::GenerateSessionId() {
 	data_t bytes[kTokenBytes];
 	session_id_rng->GenerateRandomData(bytes, kTokenBytes);
 	return HexEncode(bytes, kTokenBytes);
-}
-
-// Extract connection_id from a message if available
-static string ExtractConnectionId(QuackMessage &msg) {
-	switch (msg.Type()) {
-	case MessageType::PREPARE_REQUEST:
-		return msg.Cast<PrepareRequestMessage>().ConnectionId();
-	case MessageType::FETCH_REQUEST:
-		return msg.Cast<FetchRequestMessage>().ConnectionId();
-	case MessageType::APPEND_REQUEST:
-		return msg.Cast<AppendRequestMessage>().ConnectionId();
-	default:
-		return "";
-	}
-}
-
-static optional_idx ExtractClientQueryId(QuackMessage &msg) {
-	return msg.ClientQueryId();
 }
 
 static string ExtractQuery(QuackMessage &msg) {
@@ -179,8 +161,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 	BinaryDeserializer deserializer(read_stream);
 
 	// first read the header
-	deserializer.Begin();
-	auto header = MessageHeader::Deserialize(deserializer);
+	auto header = QuackMessage::DeserializeHeader(deserializer);
 
 	// validate if the server can handle this type of message - the server cannot handle all message types
 	if (!ServerSupportsMessage(header.type)) {
@@ -198,9 +179,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 	}
 
 	// now deserialize the actual message
-	auto received_message = QuackMessage::Deserialize(deserializer, header.type);
-	received_message->SetHeader(std::move(header));
-	deserializer.End();
+	auto received_message = QuackMessage::DeserializeMessage(deserializer, header);
 
 	// process the message
 	auto response = HandleMessageInternal(*received_message, connection);
