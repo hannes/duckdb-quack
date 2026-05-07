@@ -49,13 +49,13 @@ unique_ptr<ConnectionResponseMessage> ConnectionResponseMessage::Deserialize(Des
 	return result;
 }
 
-void ErrorMessage::Serialize(Serializer &serializer) const {
-	serializer.WritePropertyWithDefault<string>(1, "message", message);
+void ErrorResponse::Serialize(Serializer &serializer) const {
+	serializer.WritePropertyWithDefault<string>(1, "message", error.RawMessage());
 }
 
-unique_ptr<ErrorMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<ErrorResponse> ErrorResponse::Deserialize(Deserializer &deserializer) {
 	auto message = deserializer.ReadPropertyWithDefault<string>(1, "message");
-	auto result = duckdb::unique_ptr<ErrorMessage>(new ErrorMessage(std::move(message)));
+	auto result = duckdb::unique_ptr<ErrorResponse>(new ErrorResponse(std::move(message)));
 	return result;
 }
 

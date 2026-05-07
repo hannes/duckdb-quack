@@ -21,7 +21,7 @@ public:
 			if (response_message->Type() == MessageType::ERROR_RESPONSE) {
 				throw IOException("Expected %s message, got error message instead: %s",
 				                  MessageTypeToString(TARGET::TYPE),
-				                  response_message->Cast<ErrorMessage>().Error().c_str());
+				                  response_message->Cast<ErrorResponse>().ErrorMessage());
 			}
 			throw IOException("Expected %s message, got %s instead", MessageTypeToString(TARGET::TYPE),
 			                  MessageTypeToString(response_message->Type()));

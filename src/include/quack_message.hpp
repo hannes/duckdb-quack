@@ -301,24 +301,33 @@ public:
 	static unique_ptr<AppendResponseMessage> Deserialize(Deserializer &deserializer);
 };
 
-class ErrorMessage : public QuackMessage {
+class ErrorResponse : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::ERROR_RESPONSE;
-	explicit ErrorMessage(string message_p) : QuackMessage(TYPE), message(std::move(message_p)) {
+	explicit ErrorResponse(ErrorData error_p) : QuackMessage(TYPE), error(std::move(error_p)) {
 	}
-	const std::string &Error() const {
-		return message;
+	explicit ErrorResponse(const string &error_p) : QuackMessage(TYPE), error(error_p) {
+	}
+	template <typename... ARGS>
+	explicit ErrorResponse(const string &msg, ARGS &&...params)
+	    : ErrorResponse(Exception::ConstructMessage(msg, std::forward<ARGS>(params)...)) {
+	}
+	const ErrorData &Error() const {
+		return error;
+	}
+	const string &ErrorMessage() const {
+		return error.Message();
 	}
 
 	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<ErrorMessage> Deserialize(Deserializer &deserializer);
+	static unique_ptr<ErrorResponse> Deserialize(Deserializer &deserializer);
 
 protected:
-	ErrorMessage() : QuackMessage(TYPE) {
+	ErrorResponse() : QuackMessage(TYPE) {
 	}
 
 private:
-	string message;
+	ErrorData error;
 };
 
 } // namespace duckdb

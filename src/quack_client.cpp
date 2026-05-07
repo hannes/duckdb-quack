@@ -104,7 +104,7 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 		if (logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL)) {
 			string error;
 			if (response_message->Type() == MessageType::ERROR_RESPONSE) {
-				error = response_message->Cast<ErrorMessage>().Error();
+				error = response_message->Cast<ErrorResponse>().ErrorMessage();
 			}
 			auto msg =
 			    QuackLogType::ConstructLogMessage(request_type, connection_id, client_query_id, query, uri.Http(),

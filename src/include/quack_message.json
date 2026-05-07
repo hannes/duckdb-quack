@@ -25,12 +25,13 @@
     "constructor": ["type", "connection_id"]
   },
   {
-    "class": "ErrorMessage",
+    "class": "ErrorResponse",
     "members": [
       {
         "id": 1,
         "name": "message",
-        "type": "string"
+        "type": "string",
+        "serialize_property": "error.RawMessage()"
       }
     ],
     "constructor": ["message"]

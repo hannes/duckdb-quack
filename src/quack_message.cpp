@@ -115,7 +115,7 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, M
 	case MessageType::APPEND_RESPONSE:
 		return AppendResponseMessage::Deserialize(deserializer);
 	case MessageType::ERROR_RESPONSE:
-		return ErrorMessage::Deserialize(deserializer);
+		return ErrorResponse::Deserialize(deserializer);
 	default:
 		throw InternalException("Unsupported type for message deserialization");
 	}
