@@ -1,0 +1,58 @@
+#include "storage/quack_transaction.hpp"
+
+#include "duckdb/common/printer.hpp"
+#include "storage/quack_catalog.hpp"
+
+namespace duckdb {
+
+QuackTransaction::QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p,
+                                   ClientContext &context_p)
+    : Transaction(manager_p, context_p), quack_catalog(quack_catalog_p),
+      transaction_state(QuackTransactionState::TRANSACTION_NOT_YET_STARTED) {
+}
+
+QuackTransaction::~QuackTransaction() {
+}
+
+void QuackTransaction::Start() {
+	transaction_state = QuackTransactionState::TRANSACTION_NOT_YET_STARTED;
+}
+
+void QuackTransaction::ForceStart() {
+	if (transaction_state == QuackTransactionState::TRANSACTION_NOT_YET_STARTED) {
+		transaction_state = QuackTransactionState::TRANSACTION_STARTED;
+		Query("BEGIN TRANSACTION");
+	}
+}
+
+void QuackTransaction::Commit() {
+	if (transaction_state == QuackTransactionState::TRANSACTION_STARTED) {
+		transaction_state = QuackTransactionState::TRANSACTION_FINISHED;
+		Query("COMMIT");
+	}
+}
+
+void QuackTransaction::Rollback() {
+	if (transaction_state == QuackTransactionState::TRANSACTION_STARTED) {
+		transaction_state = QuackTransactionState::TRANSACTION_FINISHED;
+		Query("ROLLBACK");
+	}
+}
+
+QuackTransaction &QuackTransaction::Get(ClientContext &context, Catalog &catalog) {
+	return Transaction::Get(context, catalog).Cast<QuackTransaction>();
+}
+
+QuackTransaction &QuackTransaction::Get(CatalogTransaction transaction) {
+	if (!transaction.transaction) {
+		throw InternalException("No transaction!?");
+	}
+	return transaction.transaction->Cast<QuackTransaction>();
+}
+
+unique_ptr<ColumnDataCollection> QuackTransaction::Query(const string &query) {
+	ForceStart();
+	return quack_catalog.ExecuteCommandInternal(query);
+}
+
+} // namespace duckdb

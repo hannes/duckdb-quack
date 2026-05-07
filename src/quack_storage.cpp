@@ -4,7 +4,8 @@
 
 #include "quack_storage.hpp"
 #include "quack_server.hpp"
-#include "quack_catalog.hpp"
+#include "storage/quack_catalog.hpp"
+#include "storage/quack_transaction_manager.hpp"
 
 using namespace duckdb;
 

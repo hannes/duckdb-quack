@@ -8,14 +8,16 @@
 
 #include "quack_scan.hpp"
 #include "quack_client.hpp"
-#include "quack_catalog.hpp"
+#include "include/storage/quack_catalog.hpp"
 
 #include <queue>
-using namespace duckdb;
-
+namespace duckdb {
 static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunctionBindInput &input,
                                               vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
+	if (input.inputs.empty()) {
+		throw InternalException("No input to quack scan?");
+	}
 	if (input.inputs[0].IsNull() || input.inputs[1].IsNull()) {
 		throw BinderException("quack_query URI and query parameters cannot be NULL");
 	}
@@ -135,7 +137,7 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 };
 
 struct QuackScanGlobalState : GlobalTableFunctionState {
-	explicit QuackScanGlobalState(vector<column_t> column_ids_p, vector<idx_t> projection_id_p,
+	explicit QuackScanGlobalState(vector<ColumnIndex> column_ids_p, vector<idx_t> projection_id_p,
 	                              vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p)
 	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(std::move(column_ids_p)),
 	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p),
@@ -145,7 +147,7 @@ struct QuackScanGlobalState : GlobalTableFunctionState {
 		return max_threads;
 	}
 	idx_t max_threads;
-	vector<column_t> column_ids;
+	vector<ColumnIndex> column_ids;
 	vector<idx_t> projection_ids;
 	atomic<bool> needs_more_fetch;
 
@@ -265,7 +267,7 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 	}
 
 	// we only multithread if there is more to fetch
-	return make_uniq<QuackScanGlobalState>(input.column_ids, input.projection_ids, std::move(results),
+	return make_uniq<QuackScanGlobalState>(input.column_indexes, input.projection_ids, std::move(results),
 	                                       needs_more_fetch);
 }
 
@@ -309,17 +311,23 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 				//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
 				// The server ignores pushdown and returns every column, so we apply both hops here.
 				for (idx_t i = 0; i < output.ColumnCount(); i++) {
-					idx_t src;
+					ColumnIndex index;
 					if (!proj_ids.empty()) {
-						src = col_ids[proj_ids[i]];
+						index = col_ids[proj_ids[i]];
 					} else if (!col_ids.empty()) {
-						src = col_ids[i];
+						index = col_ids[i];
 					} else {
-						src = i;
+						index = ColumnIndex(i);
 					}
-					D_ASSERT(src < response_chunk.ColumnCount());
-					D_ASSERT(response_chunk.data[src].GetType() == output.data[i].GetType());
-					output.data[i].Reference(response_chunk.data[src]);
+					if (index.IsVirtualColumn()) {
+						// TODO
+						output.data[i].Reference(Value(output.data[i].GetType()));
+						return;
+					}
+					auto col_idx = index.GetPrimaryIndex();
+					D_ASSERT(col_idx < response_chunk.ColumnCount());
+					D_ASSERT(response_chunk.data[col_idx].GetType() == output.data[i].GetType());
+					output.data[i].Reference(response_chunk.data[col_idx]);
 				}
 			}
 			output.SetCardinality(response_chunk.size());
@@ -365,6 +373,15 @@ InsertionOrderPreservingMap<string> QuackScanToString(TableFunctionToStringInput
 	return result;
 }
 
+void QuackScanSerialize(Serializer &serializer, const optional_ptr<FunctionData> bind_data,
+                        const TableFunction &function) {
+	throw NotImplementedException("Quack scans cannot be serialized (yet?)");
+}
+
+unique_ptr<FunctionData> QuackScanDeserialize(Deserializer &deserializer, TableFunction &function) {
+	throw NotImplementedException("Quack scans cannot be deserialized (yet?)");
+}
+
 TableFunction QuackScanFunction::GetFunction() {
 	auto fun = TableFunction("quack_query", {LogicalType::VARCHAR, LogicalType::VARCHAR}, QuackScan, QuackScanBind,
 	                         QuackScanInitGlobal, QuackScanInitLocal);
@@ -374,6 +391,8 @@ TableFunction QuackScanFunction::GetFunction() {
 	fun.projection_pushdown = true;
 	fun.get_partition_data = QuackScanGetPartitionData;
 	fun.to_string = QuackScanToString;
+	fun.serialize = QuackScanSerialize;
+	fun.deserialize = QuackScanDeserialize;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
@@ -385,7 +404,10 @@ TableFunction QuackScanByNameFunction::GetFunction() {
 	fun.projection_pushdown = true;
 	fun.get_partition_data = QuackScanGetPartitionData;
 	fun.to_string = QuackScanToString;
+	fun.serialize = QuackScanSerialize;
+	fun.deserialize = QuackScanDeserialize;
 	// fun.filter_pushdown = true;
 	// fun.filter_prune = true;
 	return fun;
 }
+} // namespace duckdb

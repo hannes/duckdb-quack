@@ -3,9 +3,10 @@
 #include "duckdb/planner/operator/logical_insert.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 
-#include "quack_catalog.hpp"
+#include "storage/quack_catalog.hpp"
 #include "quack_message.hpp"
-#include "quack_insert.hpp"
+#include "storage/quack_insert.hpp"
+#include "storage/quack_table.hpp"
 #include "quack_client.hpp"
 
 using namespace duckdb;
@@ -29,12 +30,8 @@ class QuackInsertGlobalState : public GlobalSinkState {
 public:
 	explicit QuackInsertGlobalState(QuackTableCatalogEntry &table_p) : table(table_p), insert_count(0) {
 	}
-	explicit QuackInsertGlobalState(unique_ptr<CatalogEntry> owned_entry_p)
-	    : table(owned_entry_p->Cast<QuackTableCatalogEntry>()), owned_entry(std::move(owned_entry_p)), insert_count(0) {
-	}
 
 	QuackTableCatalogEntry &table;
-	unique_ptr<CatalogEntry> owned_entry;
 	idx_t insert_count;
 };
 
@@ -46,16 +43,9 @@ unique_ptr<GlobalSinkState> QuackInsert::GetGlobalSinkState(ClientContext &conte
 	auto &quack_schema = schema.get_mutable()->Cast<QuackSchemaCatalogEntry>();
 	auto &quack_catalog = quack_schema.catalog.Cast<QuackCatalog>();
 
-	auto create_table_info = info->Base().Copy();
-	create_table_info->catalog = quack_schema.GetInfo()->catalog;
-	create_table_info->schema = quack_schema.GetInfo()->schema;
-
-	auto create_request =
-	    make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), create_table_info->ToString());
-	auto create_response = quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
-	auto entry = make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(quack_schema.catalog, quack_schema,
-	                                                                  create_table_info->Cast<CreateTableInfo>());
-	return make_uniq<QuackInsertGlobalState>(std::move(entry));
+	auto entry = quack_schema.CreateTable(CatalogTransaction(quack_catalog, context), *info);
+	;
+	return make_uniq<QuackInsertGlobalState>(entry->Cast<QuackTableCatalogEntry>());
 }
 
 //===--------------------------------------------------------------------===//

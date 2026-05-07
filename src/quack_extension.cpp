@@ -11,7 +11,7 @@
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/storage/storage_extension.hpp"
 
-#include "quack_catalog.hpp"
+#include "include/storage/quack_catalog.hpp"
 #include "quack_extension.hpp"
 #include "quack_log.hpp"
 #include "quack_scan.hpp"
