@@ -162,10 +162,10 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LookupEntry(CatalogTransacti
 	auto catalog_type = lookup_info.GetCatalogType();
 	auto &entry_name = lookup_info.GetEntryName();
 	if (catalog_type == CatalogType::TABLE_FUNCTION_ENTRY) {
-		auto entry = TryLoadBuiltInFunction(entry_name);
-		if (entry) {
-			return entry;
-		}
+		return TryLoadBuiltInFunction(entry_name);
+	}
+	if (catalog_type != CatalogType::TABLE_ENTRY) {
+		return nullptr;
 	}
 
 	try {
