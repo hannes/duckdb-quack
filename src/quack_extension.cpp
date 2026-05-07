@@ -56,12 +56,23 @@ static void RegisterQuackSecretType(ExtensionLoader &loader) {
 	loader.RegisterFunction(config_fun);
 }
 
+static bool TimingSafeEqual(const string &a, const string &b) {
+	if (a.size() != b.size()) {
+		return false;
+	}
+	volatile unsigned char result = 0;
+	for (size_t i = 0; i < a.size(); i++) {
+		result |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+	}
+	return result == 0;
+}
+
 // pass session id
 static void QuackAuthToken(const DataChunk &args, ExpressionState &state, Vector &result) {
 	auto client_token = args.GetValue(1, 0).GetValue<string>();
 	auto server_token = args.GetValue(2, 0).GetValue<string>();
 
-	result.SetValue(0, Value::BOOLEAN(server_token == client_token));
+	result.SetValue(0, Value::BOOLEAN(TimingSafeEqual(client_token, server_token)));
 }
 
 static void QuackDummyAuthorization(const DataChunk &args, ExpressionState &, Vector &result) {
