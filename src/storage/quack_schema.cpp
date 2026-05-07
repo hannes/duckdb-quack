@@ -18,7 +18,7 @@ QuackSchemaSet::QuackSchemaSet(ClientContext &context, QuackCatalog &catalog, co
 		info.schema = row.GetValue(1).GetValue<string>();
 		// TODO this will fail if there are two schemas with the same name in different catalogs :/
 		auto schema = make_uniq<QuackSchemaCatalogEntry>(context, catalog, info, load_data);
-		CreateEntry(std::move(schema));
+		CreateEntry(std::move(schema), OnCreateConflict::REPLACE_ON_CONFLICT);
 	}
 }
 
@@ -80,7 +80,7 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateTable(CatalogTransacti
 	auto &quack_transaction = QuackTransaction::Get(transaction);
 	quack_transaction.Query(create_table_info->ToString());
 	auto quack_entry = make_uniq<QuackTableCatalogEntry>(catalog, *this, create_table_info->Cast<CreateTableInfo>());
-	return tables->CreateEntry(std::move(quack_entry));
+	return tables->CreateEntry(std::move(quack_entry), info.Base().on_conflict);
 }
 
 optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {

@@ -38,7 +38,7 @@ QuackTableSet::QuackTableSet(ClientContext &context, QuackSchemaCatalogEntry &pa
 		auto binder = Binder::CreateBinder(context);
 		auto bound_info = binder->BindCreateTableInfo(std::move(info), schema);
 		auto table = make_uniq<QuackTableCatalogEntry>(catalog, parent, bound_info->Base());
-		CreateEntry(std::move(table));
+		CreateEntry(std::move(table), OnCreateConflict::REPLACE_ON_CONFLICT);
 	}
 }
 
