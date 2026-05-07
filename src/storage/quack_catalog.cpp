@@ -12,6 +12,7 @@
 #include "duckdb/storage/database_size.hpp"
 
 #include "storage/quack_catalog.hpp"
+#include "storage/quack_table.hpp"
 #include "quack_scan.hpp"
 #include "storage/quack_insert.hpp"
 #include "quack_message.hpp"
@@ -19,62 +20,7 @@
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
 
-using namespace duckdb;
-
-QuackTransaction::QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p,
-                                   ClientContext &context_p)
-    : Transaction(manager_p, context_p), quack_catalog(quack_catalog_p) {
-}
-
-void QuackTransaction::Start() {
-	quack_catalog.ExecuteCommand("BEGIN TRANSACTION");
-}
-
-void QuackTransaction::Commit() {
-	quack_catalog.ExecuteCommand("COMMIT");
-}
-
-void QuackTransaction::Rollback() {
-	quack_catalog.ExecuteCommand("ROLLBACK");
-}
-
-QuackTransaction &QuackTransaction::Get(ClientContext &context, Catalog &catalog) {
-	return Transaction::Get(context, catalog).Cast<QuackTransaction>();
-}
-
-QuackTransaction::~QuackTransaction() {
-}
-
-QuackTransactionManager::QuackTransactionManager(AttachedDatabase &db_p, QuackCatalog &quack_catalog_p)
-    : TransactionManager(db_p), quack_catalog(quack_catalog_p) {
-}
-
-Transaction &QuackTransactionManager::StartTransaction(ClientContext &context) {
-	auto transaction = make_uniq<QuackTransaction>(quack_catalog, *this, context);
-	transaction->Start();
-	auto &result = *transaction;
-	lock_guard<mutex> l(transaction_lock);
-	transactions[result] = std::move(transaction);
-	return result;
-}
-ErrorData QuackTransactionManager::CommitTransaction(ClientContext &context, Transaction &transaction) {
-	auto &quack_transaction = transaction.Cast<QuackTransaction>();
-	quack_transaction.Commit();
-	lock_guard<mutex> l(transaction_lock);
-	transactions.erase(transaction);
-	return ErrorData();
-}
-
-void QuackTransactionManager::RollbackTransaction(Transaction &transaction) {
-	auto &quack_transaction = transaction.Cast<QuackTransaction>();
-	quack_transaction.Rollback();
-	lock_guard<mutex> l(transaction_lock);
-	transactions.erase(transaction);
-}
-
-void QuackTransactionManager::Checkpoint(ClientContext &context, bool force) {
-	throw NotImplementedException("Checkpoint not implemented yet");
-}
+namespace duckdb {
 
 QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p, ClientContext &context,
                            const string &token_p)
@@ -151,48 +97,6 @@ QuackClient &QuackCatalog::GetRawClient() {
 
 const string &QuackCatalog::GetConnectionId() {
 	return connection_id;
-}
-
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LookupEntry(CatalogTransaction transaction,
-                                                                const EntryLookupInfo &lookup_info) {
-	auto &schema_create_info = GetInfo()->Cast<QuackSchemaInfo>();
-
-	CreateTableInfo create_info(*this, lookup_info.GetEntryName());
-	auto &quack_catalog = catalog.Cast<QuackCatalog>();
-	auto catalog_type = lookup_info.GetCatalogType();
-	auto &entry_name = lookup_info.GetEntryName();
-	if (catalog_type == CatalogType::TABLE_FUNCTION_ENTRY) {
-		return TryLoadBuiltInFunction(entry_name);
-	}
-	if (catalog_type != CatalogType::TABLE_ENTRY) {
-		return nullptr;
-	}
-
-	try {
-		auto bind_response = quack_catalog.GetRawClient().Request<PrepareResponseMessage>(
-		    make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(),
-		                                     StringUtil::Format("FROM %s WHERE FALSE", lookup_info.GetEntryName())));
-		for (idx_t i = 0; i < bind_response->Types().size(); i++) {
-			create_info.columns.AddColumn(ColumnDefinition(bind_response->Names()[i], bind_response->Types()[i]));
-		}
-		return new QuackTableCatalogEntry(catalog, *this, create_info);
-	} catch (IOException &ex) { // FIXME this should not be a catch on IOError
-		return nullptr;
-	}
-}
-
-TableFunction QuackTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
-	auto &quack_catalog = catalog.Cast<QuackCatalog>();
-	auto bind_data = make_uniq<QuackScanBindData>();
-	bind_data->server_uri = quack_catalog.GetServerUri();
-	bind_data->connection_id = quack_catalog.GetConnectionId();
-	bind_data->table_name = name;
-	for (auto &col : GetColumns().Physical()) {
-		bind_data->column_names.push_back(col.Name());
-		bind_data->column_types.push_back(col.Type());
-	}
-	bind_data_p = std::move(bind_data);
-	return QuackScanFunction::GetFunction();
 }
 
 optional_ptr<CatalogEntry> QuackCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
@@ -359,3 +263,4 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::TryLoadBuiltInFunction(const
 	}
 	return nullptr;
 }
+} // namespace duckdb

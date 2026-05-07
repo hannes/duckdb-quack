@@ -9,12 +9,7 @@
 #pragma once
 
 #include "duckdb/catalog/catalog.hpp"
-#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
-#include "duckdb/parser/parsed_data/create_schema_info.hpp"
-#include "duckdb/transaction/transaction.hpp"
-#include "duckdb/transaction/transaction_manager.hpp"
-#include "duckdb/catalog/default/default_table_functions.hpp"
-
+#include "storage/quack_schema.hpp"
 #include "quack_uri.hpp"
 
 namespace duckdb {
@@ -22,100 +17,11 @@ namespace duckdb {
 class QuackCatalog;
 class QuackClient;
 
-class QuackTransaction : public Transaction {
-public:
-	QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p, ClientContext &context_p);
-	~QuackTransaction() override;
-	// TODO
-	void Start();
-	void Commit();
-	void Rollback();
-	//
-	// optional_ptr<CatalogEntry> GetCatalogEntry(const string &table_name);
-	// void DropEntry(CatalogType type, const string &table_name, bool cascade);
-	// void ClearTableEntry(const string &table_name);
-	//
-	static QuackTransaction &Get(ClientContext &context, Catalog &catalog);
-
-private:
-	QuackCatalog &quack_catalog;
-	case_insensitive_map_t<unique_ptr<CatalogEntry>> catalog_entries;
-};
-
-class QuackTransactionManager : public TransactionManager {
-public:
-	QuackTransactionManager(AttachedDatabase &db_p, QuackCatalog &sqlite_catalog);
-
-	Transaction &StartTransaction(ClientContext &context) override;
-	ErrorData CommitTransaction(ClientContext &context, Transaction &transaction) override;
-	void RollbackTransaction(Transaction &transaction) override;
-
-	void Checkpoint(ClientContext &context, bool force = false) override;
-
-private:
-	QuackCatalog &quack_catalog;
-	mutex transaction_lock;
-	reference_map_t<Transaction, unique_ptr<QuackTransaction>> transactions;
-};
-
-struct QuackSchemaInfo : CreateSchemaInfo {
-	string schema_name;
-	string catalog_name;
-};
-
-class QuackTableCatalogEntry : public TableCatalogEntry {
-public:
-	QuackTableCatalogEntry(Catalog &catalog_p, SchemaCatalogEntry &schema_p, CreateTableInfo &info_p)
-	    : TableCatalogEntry(catalog_p, schema_p, info_p) {
-	}
-
-	unique_ptr<BaseStatistics> GetStatistics(ClientContext &context, column_t column_id) override;
-	TableFunction GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) override;
-	TableStorageInfo GetStorageInfo(ClientContext &context) override;
-};
-
-class QuackSchemaCatalogEntry : public SchemaCatalogEntry {
-public:
-	QuackSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p) : SchemaCatalogEntry(catalog_p, info_p) {
-	}
-
-	void Scan(ClientContext &context, CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
-	void Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
-
-	optional_ptr<CatalogEntry> CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
-	                                       TableCatalogEntry &table) override;
-	optional_ptr<CatalogEntry> CreateFunction(CatalogTransaction transaction, CreateFunctionInfo &info) override;
-	optional_ptr<CatalogEntry> CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) override;
-	optional_ptr<CatalogEntry> CreateView(CatalogTransaction transaction, CreateViewInfo &info) override;
-	optional_ptr<CatalogEntry> CreateSequence(CatalogTransaction transaction, CreateSequenceInfo &info) override;
-	optional_ptr<CatalogEntry> CreateTableFunction(CatalogTransaction transaction,
-	                                               CreateTableFunctionInfo &info) override;
-	optional_ptr<CatalogEntry> CreateCopyFunction(CatalogTransaction transaction,
-	                                              CreateCopyFunctionInfo &info) override;
-	optional_ptr<CatalogEntry> CreatePragmaFunction(CatalogTransaction transaction,
-	                                                CreatePragmaFunctionInfo &info) override;
-	optional_ptr<CatalogEntry> CreateCollation(CatalogTransaction transaction, CreateCollationInfo &info) override;
-
-	optional_ptr<CatalogEntry> CreateType(CatalogTransaction transaction, CreateTypeInfo &info) override;
-
-	optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction transaction, const EntryLookupInfo &lookup_info) override;
-	void DropEntry(ClientContext &context, DropInfo &info) override;
-	void Alter(CatalogTransaction transaction, AlterInfo &info) override;
-
-private:
-	optional_ptr<CatalogEntry> TryLoadBuiltInFunction(const string &entry_name);
-	optional_ptr<CatalogEntry> LoadBuiltInFunction(DefaultTableMacro macro);
-
-private:
-	mutex default_function_lock;
-	case_insensitive_map_t<unique_ptr<CatalogEntry>> default_function_map;
-};
-
 class QuackCatalog : public Catalog {
 public:
 	explicit QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p, ClientContext &context,
 	                      const string &token);
-	~QuackCatalog();
+	~QuackCatalog() override;
 
 public:
 	string GetCatalogType() override {

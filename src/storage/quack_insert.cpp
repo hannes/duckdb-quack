@@ -6,6 +6,7 @@
 #include "storage/quack_catalog.hpp"
 #include "quack_message.hpp"
 #include "storage/quack_insert.hpp"
+#include "storage/quack_table.hpp"
 #include "quack_client.hpp"
 
 using namespace duckdb;
