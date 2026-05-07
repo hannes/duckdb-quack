@@ -97,6 +97,7 @@ private:
 	unique_ptr<QuackMessage> ReadMessage(MemoryStream &read_stream);
 
 	unique_ptr<duckdb_httplib::Server> server;
+	bool is_running = false;
 };
 ;
 
