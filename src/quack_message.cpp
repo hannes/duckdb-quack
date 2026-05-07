@@ -5,9 +5,17 @@
 
 #include "quack_message.hpp"
 
-using namespace duckdb;
+namespace duckdb {
 
-string duckdb::MessageTypeToString(MessageType type) {
+QuackMessage::QuackMessage(MessageType type) : header(type, string()) {
+}
+QuackMessage::QuackMessage(MessageType type, string connection_id_p) : header(type, std::move(connection_id_p)) {
+	// if (connection_id_p.empty()) {
+	// 	throw InvalidInputException("Received message of type \"%s\" with an empty connection id - but this message type requires a connection id", EnumUtil::ToString(type));
+	// }
+}
+
+string MessageTypeToString(MessageType type) {
 	return EnumUtil::ToString(type);
 }
 
@@ -71,7 +79,7 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 
 	default:
 		throw NotImplementedException(
-		    StringUtil::Format("Enum value of type MessageType: '%d' not implemented", value));
+			StringUtil::Format("Enum value of type MessageType: '%d' not implemented", value));
 	}
 }
 
@@ -81,15 +89,55 @@ void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
 	BinarySerializer serializer(write_stream, options);
 
+	// serializer.Begin();
+	// serializer.End();
+
 	serializer.Begin();
+	// write the header
+	header.Serialize(serializer);
+	// write the body
 	Serialize(serializer);
 	serializer.End();
+}
+
+unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, MessageType message_type) {
+	switch(message_type) {
+	case MessageType::CONNECTION_REQUEST:
+		return ConnectionRequestMessage::Deserialize(deserializer);
+	case MessageType::CONNECTION_RESPONSE:
+		return ConnectionResponseMessage::Deserialize(deserializer);
+	case MessageType::PREPARE_REQUEST:
+		return PrepareRequestMessage::Deserialize(deserializer);
+	case MessageType::PREPARE_RESPONSE:
+		return PrepareResponseMessage::Deserialize(deserializer);
+	case MessageType::FETCH_REQUEST:
+		return FetchRequestMessage::Deserialize(deserializer);
+	case MessageType::FETCH_RESPONSE:
+		return FetchResponseMessage::Deserialize(deserializer);
+	case MessageType::APPEND_REQUEST:
+		return AppendRequestMessage::Deserialize(deserializer);
+	case MessageType::APPEND_RESPONSE:
+		return AppendResponseMessage::Deserialize(deserializer);
+	case MessageType::ERROR_RESPONSE:
+		return ErrorMessage::Deserialize(deserializer);
+	default:
+		throw InternalException("Unsupported type for message deserialization");
+	}
 }
 
 unique_ptr<QuackMessage> QuackMessage::FromMemoryStream(MemoryStream &read_stream) {
 	read_stream.Rewind();
 	BinaryDeserializer deserializer(read_stream);
-	return Deserialize(deserializer);
+
+	deserializer.Begin();
+	// read the header
+	auto header = MessageHeader::Deserialize(deserializer);
+	// read the body
+	auto result = Deserialize(deserializer, header.type);
+	result->SetHeader(std::move(header));
+	deserializer.End();
+
+	return result;
 }
 
 void DataChunkWrapper::Serialize(Serializer &serializer) const {
@@ -100,4 +148,5 @@ unique_ptr<DataChunkWrapper> DataChunkWrapper::Deserialize(Deserializer &deseria
 	DataChunk chunk;
 	deserializer.ReadObject(300, "chunk", [&](Deserializer &inner) { chunk.Deserialize(inner); });
 	return make_uniq<DataChunkWrapper>(chunk);
+}
 }
