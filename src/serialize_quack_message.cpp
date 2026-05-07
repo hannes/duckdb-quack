@@ -9,158 +9,114 @@
 
 namespace duckdb {
 
-void QuackMessage::Serialize(Serializer &serializer) const {
-	serializer.WriteProperty<MessageType>(100, "type", type);
+void AppendRequestMessage::Serialize(Serializer &serializer) const {
+	serializer.WritePropertyWithDefault<string>(1, "schema_name", schema_name);
+	serializer.WritePropertyWithDefault<string>(2, "table_name", table_name);
+	serializer.WritePropertyWithDefault<unique_ptr<DataChunkWrapper>>(3, "append_chunk", append_chunk);
 }
 
-unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer) {
-	auto type = deserializer.ReadProperty<MessageType>(100, "type");
-	unique_ptr<QuackMessage> result;
-	switch (type) {
-	case MessageType::APPEND_REQUEST:
-		result = AppendRequestMessage::Deserialize(deserializer);
-		break;
-	case MessageType::APPEND_RESPONSE:
-		result = AppendResponseMessage::Deserialize(deserializer);
-		break;
-	case MessageType::CONNECTION_REQUEST:
-		result = ConnectionRequestMessage::Deserialize(deserializer);
-		break;
-	case MessageType::CONNECTION_RESPONSE:
-		result = ConnectionResponseMessage::Deserialize(deserializer);
-		break;
-	case MessageType::ERROR_RESPONSE:
-		result = ErrorMessage::Deserialize(deserializer);
-		break;
-	case MessageType::FETCH_REQUEST:
-		result = FetchRequestMessage::Deserialize(deserializer);
-		break;
-	case MessageType::FETCH_RESPONSE:
-		result = FetchResponseMessage::Deserialize(deserializer);
-		break;
-	case MessageType::PREPARE_REQUEST:
-		result = PrepareRequestMessage::Deserialize(deserializer);
-		break;
-	case MessageType::PREPARE_RESPONSE:
-		result = PrepareResponseMessage::Deserialize(deserializer);
-		break;
-	default:
-		throw SerializationException("Unsupported type for deserialization of QuackMessage!");
-	}
+unique_ptr<AppendRequestMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<AppendRequestMessage>(new AppendRequestMessage());
+	deserializer.ReadPropertyWithDefault<string>(1, "schema_name", result->schema_name);
+	deserializer.ReadPropertyWithDefault<string>(2, "table_name", result->table_name);
+	deserializer.ReadPropertyWithDefault<unique_ptr<DataChunkWrapper>>(3, "append_chunk", result->append_chunk);
 	return result;
 }
 
-void AppendRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<string>(200, "connection_id", connection_id);
-	serializer.WritePropertyWithDefault<string>(201, "schema_name", schema_name);
-	serializer.WritePropertyWithDefault<string>(202, "table_name", table_name);
-	serializer.WritePropertyWithDefault<unique_ptr<DataChunkWrapper>>(203, "append_chunk", append_chunk);
-}
-
-unique_ptr<QuackMessage> AppendRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadPropertyWithDefault<string>(200, "connection_id");
-	auto schema_name = deserializer.ReadPropertyWithDefault<string>(201, "schema_name");
-	auto table_name = deserializer.ReadPropertyWithDefault<string>(202, "table_name");
-	auto append_chunk = deserializer.ReadPropertyWithDefault<unique_ptr<DataChunkWrapper>>(203, "append_chunk");
-	auto result = duckdb::unique_ptr<AppendRequestMessage>(new AppendRequestMessage(std::move(connection_id), std::move(schema_name), std::move(table_name), std::move(append_chunk)));
-	return std::move(result);
-}
-
 void AppendResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
 }
 
-unique_ptr<QuackMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<AppendResponseMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<AppendResponseMessage>(new AppendResponseMessage());
-	return std::move(result);
+	return result;
 }
 
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<string>(200, "auth_string", auth_string);
+	serializer.WritePropertyWithDefault<string>(1, "auth_string", auth_string);
 }
 
-unique_ptr<QuackMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto auth_string = deserializer.ReadPropertyWithDefault<string>(200, "auth_string");
-	auto result = duckdb::unique_ptr<ConnectionRequestMessage>(new ConnectionRequestMessage(std::move(auth_string)));
-	return std::move(result);
+unique_ptr<ConnectionRequestMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<ConnectionRequestMessage>(new ConnectionRequestMessage());
+	deserializer.ReadPropertyWithDefault<string>(1, "auth_string", result->auth_string);
+	return result;
 }
 
 void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<string>(200, "connection_id", connection_id);
 }
 
-unique_ptr<QuackMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadPropertyWithDefault<string>(200, "connection_id");
-	auto result = duckdb::unique_ptr<ConnectionResponseMessage>(new ConnectionResponseMessage(std::move(connection_id)));
-	return std::move(result);
+unique_ptr<ConnectionResponseMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<ConnectionResponseMessage>(new ConnectionResponseMessage());
+	return result;
 }
 
 void ErrorMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<string>(200, "message", message);
+	serializer.WritePropertyWithDefault<string>(1, "message", message);
 }
 
-unique_ptr<QuackMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
-	auto message = deserializer.ReadPropertyWithDefault<string>(200, "message");
+unique_ptr<ErrorMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
+	auto message = deserializer.ReadPropertyWithDefault<string>(1, "message");
 	auto result = duckdb::unique_ptr<ErrorMessage>(new ErrorMessage(std::move(message)));
-	return std::move(result);
+	return result;
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<string>(200, "connection_id", connection_id);
 }
 
-unique_ptr<QuackMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadPropertyWithDefault<string>(200, "connection_id");
-	auto result = duckdb::unique_ptr<FetchRequestMessage>(new FetchRequestMessage(std::move(connection_id)));
-	return std::move(result);
+unique_ptr<FetchRequestMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<FetchRequestMessage>(new FetchRequestMessage());
+	return result;
 }
 
 void FetchResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(200, "results", results);
-	serializer.WriteProperty<optional_idx>(201, "batch_index", batch_index);
+	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(1, "results", results);
+	serializer.WriteProperty<optional_idx>(2, "batch_index", batch_index);
 }
 
-unique_ptr<QuackMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(200, "results");
-	auto batch_index = deserializer.ReadProperty<optional_idx>(201, "batch_index");
-	auto result = duckdb::unique_ptr<FetchResponseMessage>(new FetchResponseMessage(std::move(results), batch_index));
-	return std::move(result);
+unique_ptr<FetchResponseMessage> FetchResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<FetchResponseMessage>(new FetchResponseMessage());
+	deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(1, "results", result->results);
+	deserializer.ReadProperty<optional_idx>(2, "batch_index", result->batch_index);
+	return result;
+}
+
+void MessageHeader::Serialize(Serializer &serializer) const {
+	serializer.WriteProperty<MessageType>(1, "type", type);
+	serializer.WritePropertyWithDefault<string>(2, "connection_id", connection_id);
+	serializer.WriteProperty<optional_idx>(3, "client_query_id", client_query_id);
+}
+
+MessageHeader MessageHeader::Deserialize(Deserializer &deserializer) {
+	auto type = deserializer.ReadProperty<MessageType>(1, "type");
+	auto connection_id = deserializer.ReadPropertyWithDefault<string>(2, "connection_id");
+	MessageHeader result(type, std::move(connection_id));
+	deserializer.ReadProperty<optional_idx>(3, "client_query_id", result.client_query_id);
+	return result;
 }
 
 void PrepareRequestMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<string>(200, "connection_id", connection_id);
-	serializer.WritePropertyWithDefault<string>(201, "sql_query", sql_query);
+	serializer.WritePropertyWithDefault<string>(1, "sql_query", sql_query);
 }
 
-unique_ptr<QuackMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
-	auto connection_id = deserializer.ReadPropertyWithDefault<string>(200, "connection_id");
-	auto sql_query = deserializer.ReadPropertyWithDefault<string>(201, "sql_query");
-	auto result = duckdb::unique_ptr<PrepareRequestMessage>(new PrepareRequestMessage(std::move(connection_id), std::move(sql_query)));
-	return std::move(result);
+unique_ptr<PrepareRequestMessage> PrepareRequestMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<PrepareRequestMessage>(new PrepareRequestMessage());
+	deserializer.ReadPropertyWithDefault<string>(1, "sql_query", result->sql_query);
+	return result;
 }
 
 void PrepareResponseMessage::Serialize(Serializer &serializer) const {
-	QuackMessage::Serialize(serializer);
-	serializer.WritePropertyWithDefault<vector<LogicalType>>(200, "result_types", result_types);
-	serializer.WritePropertyWithDefault<vector<string>>(201, "result_names", result_names);
-	serializer.WritePropertyWithDefault<bool>(202, "needs_more_fetch", needs_more_fetch);
-	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(203, "results", results);
+	serializer.WritePropertyWithDefault<vector<LogicalType>>(1, "result_types", result_types);
+	serializer.WritePropertyWithDefault<vector<string>>(2, "result_names", result_names);
+	serializer.WritePropertyWithDefault<bool>(3, "needs_more_fetch", needs_more_fetch);
+	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results", results);
 }
 
-unique_ptr<QuackMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto result_types = deserializer.ReadPropertyWithDefault<vector<LogicalType>>(200, "result_types");
-	auto result_names = deserializer.ReadPropertyWithDefault<vector<string>>(201, "result_names");
-	auto needs_more_fetch = deserializer.ReadPropertyWithDefault<bool>(202, "needs_more_fetch");
-	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(203, "results");
+unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
+	auto result_types = deserializer.ReadPropertyWithDefault<vector<LogicalType>>(1, "result_types");
+	auto result_names = deserializer.ReadPropertyWithDefault<vector<string>>(2, "result_names");
+	auto needs_more_fetch = deserializer.ReadPropertyWithDefault<bool>(3, "needs_more_fetch");
+	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results");
 	auto result = duckdb::unique_ptr<PrepareResponseMessage>(new PrepareResponseMessage(std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch));
-	return std::move(result);
+	return result;
 }
 
 } // namespace duckdb

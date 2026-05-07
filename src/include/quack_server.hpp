@@ -49,8 +49,9 @@ public:
 	virtual ~QuackServer();
 
 protected:
-	unique_ptr<QuackMessage> HandleMessage(QuackMessage &received_message);
-	unique_ptr<QuackMessage> HandleMessageInternal(QuackMessage &received_message);
+	unique_ptr<QuackMessage> HandleMessage(MemoryStream &read_stream);
+	unique_ptr<QuackMessage> HandleMessageInternal(QuackMessage &received_message,
+	                                               optional_ptr<QuackConnection> connection);
 
 protected:
 	std::vector<std::thread> listen_threads;
@@ -77,6 +78,8 @@ public:
 
 private:
 	static void ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port);
+
+	unique_ptr<QuackMessage> ReadMessage(MemoryStream &read_stream);
 
 	unique_ptr<duckdb_httplib::Server> server;
 };
