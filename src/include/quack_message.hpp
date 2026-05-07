@@ -44,7 +44,9 @@ private:
 string MessageTypeToString(MessageType type);
 
 struct MessageHeader {
-	MessageHeader(MessageType type_p, string connection_id_p) : type(type_p), connection_id(std::move(connection_id_p)) {}
+	MessageHeader(MessageType type_p, string connection_id_p)
+	    : type(type_p), connection_id(std::move(connection_id_p)) {
+	}
 
 	MessageType type = MessageType::INVALID;
 	string connection_id;
@@ -125,7 +127,8 @@ public:
 	static unique_ptr<PrepareRequestMessage> Deserialize(Deserializer &deserializer);
 
 protected:
-	PrepareRequestMessage() : QuackMessage(TYPE) {}
+	PrepareRequestMessage() : QuackMessage(TYPE) {
+	}
 
 private:
 	string sql_query;
@@ -162,7 +165,8 @@ public:
 	static unique_ptr<PrepareResponseMessage> Deserialize(Deserializer &deserializer);
 
 protected:
-	PrepareResponseMessage() : QuackMessage(TYPE) {}
+	PrepareResponseMessage() : QuackMessage(TYPE) {
+	}
 
 private:
 	vector<LogicalType> result_types;
@@ -187,7 +191,8 @@ public:
 	static unique_ptr<ConnectionRequestMessage> Deserialize(Deserializer &deserializer);
 
 protected:
-	ConnectionRequestMessage() : QuackMessage(TYPE) {}
+	ConnectionRequestMessage() : QuackMessage(TYPE) {
+	}
 
 private:
 	string auth_string;
@@ -197,12 +202,12 @@ class ConnectionResponseMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CONNECTION_RESPONSE;
 
-	explicit ConnectionResponseMessage(string connection_id_p)
-	    : QuackMessage(TYPE, std::move(connection_id_p)) {
+	explicit ConnectionResponseMessage(string connection_id_p) : QuackMessage(TYPE, std::move(connection_id_p)) {
 	}
 
 protected:
-	ConnectionResponseMessage() : QuackMessage(TYPE) {}
+	ConnectionResponseMessage() : QuackMessage(TYPE) {
+	}
 
 public:
 	void Serialize(Serializer &serializer) const override;
@@ -213,10 +218,12 @@ class FetchRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::FETCH_REQUEST;
 
-	explicit FetchRequestMessage(string connection_id_p) : QuackMessage(TYPE, std::move(connection_id_p)) {}
+	explicit FetchRequestMessage(string connection_id_p) : QuackMessage(TYPE, std::move(connection_id_p)) {
+	}
 
 protected:
-	FetchRequestMessage() : QuackMessage(TYPE) {}
+	FetchRequestMessage() : QuackMessage(TYPE) {
+	}
 
 public:
 	void Serialize(Serializer &serializer) const override;
@@ -267,10 +274,11 @@ class AppendRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::APPEND_REQUEST;
 
-	explicit AppendRequestMessage(string connection_id_p, string schema_name_p,
-	                              string table_name_p, unique_ptr<DataChunkWrapper> append_chunk_p)
-	    : QuackMessage(TYPE, std::move(connection_id_p)), schema_name(std::move(schema_name_p)), table_name(std::move(table_name_p)),
-	      append_chunk(std::move(append_chunk_p)) {}
+	explicit AppendRequestMessage(string connection_id_p, string schema_name_p, string table_name_p,
+	                              unique_ptr<DataChunkWrapper> append_chunk_p)
+	    : QuackMessage(TYPE, std::move(connection_id_p)), schema_name(std::move(schema_name_p)),
+	      table_name(std::move(table_name_p)), append_chunk(std::move(append_chunk_p)) {
+	}
 
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<AppendRequestMessage> Deserialize(Deserializer &deserializer);
@@ -286,7 +294,8 @@ public:
 	}
 
 protected:
-	AppendRequestMessage() : QuackMessage(TYPE) {}
+	AppendRequestMessage() : QuackMessage(TYPE) {
+	}
 
 private:
 	string schema_name;
@@ -317,7 +326,8 @@ public:
 	static unique_ptr<ErrorMessage> Deserialize(Deserializer &deserializer);
 
 protected:
-	ErrorMessage() : QuackMessage(TYPE) {}
+	ErrorMessage() : QuackMessage(TYPE) {
+	}
 
 private:
 	string message;

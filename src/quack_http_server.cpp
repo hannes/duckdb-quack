@@ -6,7 +6,7 @@
 
 #include "httplib.hpp"
 
-using namespace duckdb;
+namespace duckdb {
 
 void HttpQuackServer::Close() {
 	// Stops accepting new connections and joins the listener threads (NOT the
@@ -23,7 +23,7 @@ void HttpQuackServer::Close() {
 }
 
 HttpQuackServer::~HttpQuackServer() {
-	Close();
+	HttpQuackServer::Close();
 }
 
 void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
@@ -69,7 +69,8 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 			stream.WriteData((data_ptr_t)data, data_length);
 			return true;
 		});
-		HandleMessage(*QuackMessage::FromMemoryStream(stream))->ToMemoryStream(stream);
+		auto response = HandleMessage(stream);
+		response->ToMemoryStream(stream);
 		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/duckdb");
 	});
 
@@ -79,3 +80,5 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 
 	listen_threads.push_back(std::thread(ListenThread, this, uri_p.Host(), uri_p.Port()));
 }
+
+} // namespace duckdb

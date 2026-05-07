@@ -11,7 +11,8 @@ QuackMessage::QuackMessage(MessageType type) : header(type, string()) {
 }
 QuackMessage::QuackMessage(MessageType type, string connection_id_p) : header(type, std::move(connection_id_p)) {
 	// if (connection_id_p.empty()) {
-	// 	throw InvalidInputException("Received message of type \"%s\" with an empty connection id - but this message type requires a connection id", EnumUtil::ToString(type));
+	// 	throw InvalidInputException("Received message of type \"%s\" with an empty connection id - but this message type
+	// requires a connection id", EnumUtil::ToString(type));
 	// }
 }
 
@@ -79,7 +80,7 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 
 	default:
 		throw NotImplementedException(
-			StringUtil::Format("Enum value of type MessageType: '%d' not implemented", value));
+		    StringUtil::Format("Enum value of type MessageType: '%d' not implemented", value));
 	}
 }
 
@@ -101,7 +102,7 @@ void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 }
 
 unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, MessageType message_type) {
-	switch(message_type) {
+	switch (message_type) {
 	case MessageType::CONNECTION_REQUEST:
 		return ConnectionRequestMessage::Deserialize(deserializer);
 	case MessageType::CONNECTION_RESPONSE:
@@ -149,4 +150,4 @@ unique_ptr<DataChunkWrapper> DataChunkWrapper::Deserialize(Deserializer &deseria
 	deserializer.ReadObject(300, "chunk", [&](Deserializer &inner) { chunk.Deserialize(inner); });
 	return make_uniq<DataChunkWrapper>(chunk);
 }
-}
+} // namespace duckdb
