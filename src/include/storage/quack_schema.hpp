@@ -11,15 +11,25 @@
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/catalog/default/default_table_functions.hpp"
+#include "storage/quack_catalog_set.hpp"
 
 namespace duckdb {
 
 class QuackCatalog;
+class QuackTableSet;
+
+class QuackSchemaSet : public QuackCatalogSet {
+public:
+	QuackSchemaSet(ClientContext &context, QuackCatalog &catalog, const QuackLoadCatalogData &load_data);
+
+	static string GetLoadQuery();
+};
 
 class QuackSchemaCatalogEntry : public SchemaCatalogEntry {
 public:
-	QuackSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p) : SchemaCatalogEntry(catalog_p, info_p) {
-	}
+	QuackSchemaCatalogEntry(ClientContext &context, Catalog &catalog_p, CreateSchemaInfo &info_p,
+	                        const QuackLoadCatalogData &load_data);
+	~QuackSchemaCatalogEntry() override;
 
 	void Scan(ClientContext &context, CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
 	void Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) override;
@@ -49,13 +59,11 @@ private:
 	optional_ptr<CatalogEntry> LoadBuiltInFunction(DefaultTableMacro macro);
 
 private:
+	unique_ptr<QuackTableSet> tables;
+
+private:
 	mutex default_function_lock;
 	case_insensitive_map_t<unique_ptr<CatalogEntry>> default_function_map;
-};
-
-struct QuackSchemaInfo : CreateSchemaInfo {
-	string schema_name;
-	string catalog_name;
 };
 
 } // namespace duckdb

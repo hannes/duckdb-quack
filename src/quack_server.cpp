@@ -293,6 +293,11 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		std::unique_lock<std::mutex> lock(connection->lock);
 		auto &context = *connection->duckdb_connection->context;
 		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());
+		if (!table_info) {
+			return make_uniq<ErrorMessage>(StringUtil::Format("Table %s.%s does not exist",
+			                                                  SQLIdentifier(append_request_message.SchemaName()),
+			                                                  SQLIdentifier(append_request_message.TableName())));
+		}
 		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
 		collection.Append(append_request_message.AppendChunk());
 		connection->duckdb_connection->Append(*table_info, collection);

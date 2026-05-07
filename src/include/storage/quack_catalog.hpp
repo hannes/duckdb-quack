@@ -52,7 +52,7 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
-	unique_ptr<ColumnDataCollection> ExecuteCommand(const string &query);
+	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(const string &query);
 	const QuackUri &GetServerUri();
 	const string &GetConnectionId();
 
@@ -60,10 +60,14 @@ public:
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
+
+	QuackLoadCatalogData LoadCatalog();
+
+private:
 	QuackUri server_uri;
 	unique_ptr<QuackClient> client;
+	unique_ptr<QuackSchemaSet> schemas;
 	string connection_id;
-	unordered_map<string, unique_ptr<QuackSchemaCatalogEntry>> schemas;
 };
 
 } // namespace duckdb

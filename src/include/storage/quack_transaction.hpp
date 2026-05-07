@@ -10,31 +10,34 @@
 
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/transaction/transaction.hpp"
-
-#include "quack_uri.hpp"
+#include "storage/quack_schema.hpp"
 
 namespace duckdb {
 
 class QuackCatalog;
 
+enum class QuackTransactionState { TRANSACTION_NOT_YET_STARTED, TRANSACTION_STARTED, TRANSACTION_FINISHED };
+
 class QuackTransaction : public Transaction {
 public:
 	QuackTransaction(QuackCatalog &quack_catalog_p, TransactionManager &manager_p, ClientContext &context_p);
 	~QuackTransaction() override;
-	// TODO
+
+	//! Lazily start a transaction - this won't actually do anything until the first query is fired
 	void Start();
+	//! Forcibly start a transaction - ensure we actually start a transaction server-side
+	void ForceStart();
 	void Commit();
 	void Rollback();
-	//
-	// optional_ptr<CatalogEntry> GetCatalogEntry(const string &table_name);
-	// void DropEntry(CatalogType type, const string &table_name, bool cascade);
-	// void ClearTableEntry(const string &table_name);
-	//
+
 	static QuackTransaction &Get(ClientContext &context, Catalog &catalog);
+	static QuackTransaction &Get(CatalogTransaction transaction);
+
+	unique_ptr<ColumnDataCollection> Query(const string &query);
 
 private:
 	QuackCatalog &quack_catalog;
-	case_insensitive_map_t<unique_ptr<CatalogEntry>> catalog_entries;
+	QuackTransactionState transaction_state;
 };
 
 } // namespace duckdb

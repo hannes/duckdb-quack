@@ -1,14 +1,11 @@
-#include "duckdb/catalog/catalog_entry/table_macro_catalog_entry.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
-#include "duckdb/parser/parsed_data/create_table_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb/planner/operator/logical_insert.hpp"
-#include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/storage/database_size.hpp"
 
 #include "storage/quack_catalog.hpp"
@@ -17,6 +14,7 @@
 #include "storage/quack_insert.hpp"
 #include "quack_message.hpp"
 #include "quack_client.hpp"
+#include "storage/quack_transaction.hpp"
 
 // FIXME bunch of stuff copied from postgres scanner, can probably be simplified!
 
@@ -42,17 +40,16 @@ QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p,
 	auto connection_response = client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
 	connection_id = connection_response->ConnectionId();
 
-	// TODO a tiiny bit clunky this
-	auto schemata = ExecuteCommand("FROM information_schema.schemata SELECT catalog_name, schema_name WHERE "
-	                               "catalog_name NOT IN ('system', 'temp') ORDER BY ALL");
-	auto row_collection = make_uniq<ColumnDataRowCollection>(schemata->GetRows());
-	for (idx_t row_idx = 0; row_idx < row_collection->size(); row_idx++) {
-		QuackSchemaInfo info;
-		info.catalog_name = row_collection->GetValue(0, row_idx).GetValue<string>();
-		info.schema_name = row_collection->GetValue(1, row_idx).GetValue<string>();
-		// TODO this will fail if there are two schemas with the same name in different catalogs :/
-		schemas[info.schema_name] = make_uniq<QuackSchemaCatalogEntry>(*this, info);
-	}
+	// load the entire catalog up-front
+	auto load_info = LoadCatalog();
+	schemas = make_uniq<QuackSchemaSet>(context, *this, load_info);
+}
+
+QuackLoadCatalogData QuackCatalog::LoadCatalog() {
+	QuackLoadCatalogData result;
+	result.schemas = ExecuteCommandInternal(QuackSchemaSet::GetLoadQuery());
+	result.tables = ExecuteCommandInternal(QuackTableSet::GetLoadQuery());
+	return result;
 }
 
 QuackCatalog::~QuackCatalog() {
@@ -64,23 +61,25 @@ void QuackCatalog::Initialize(bool load_builtin) {
 optional_ptr<SchemaCatalogEntry> QuackCatalog::LookupSchema(CatalogTransaction transaction,
                                                             const EntryLookupInfo &schema_lookup,
                                                             OnEntryNotFound if_not_found) {
-	auto schema_name = schema_lookup.GetEntryName();
-	if (schemas.find(schema_name) == schemas.end()) {
-		switch (if_not_found) {
-		case OnEntryNotFound::THROW_EXCEPTION:
-			throw BinderException("Schema with name \"%s\" not found", schema_name);
-		case OnEntryNotFound::RETURN_NULL:
-			return nullptr;
-		}
+	auto &schema_name = schema_lookup.GetEntryName();
+	auto schema_entry = schemas->GetEntry(schema_name);
+	if (schema_entry) {
+		return schema_entry->Cast<SchemaCatalogEntry>();
 	}
-	return schemas[schema_name].get();
+	switch (if_not_found) {
+	case OnEntryNotFound::THROW_EXCEPTION:
+		throw BinderException("Schema with name \"%s\" not found", schema_name);
+	case OnEntryNotFound::RETURN_NULL:
+	default:
+		return nullptr;
+	}
 }
 
 const QuackUri &QuackCatalog::GetServerUri() {
 	return server_uri;
 }
 
-unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommand(const string &query) {
+unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const string &query) {
 	// FIXME this will break with many results!
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
 	auto response = client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query));
@@ -100,19 +99,20 @@ const string &QuackCatalog::GetConnectionId() {
 }
 
 optional_ptr<CatalogEntry> QuackCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
-	auto create_schema_info = info.Copy();
-	// TODO this does not make too much sense?
-	create_schema_info->catalog = "memory";
-
-	auto create_request = make_uniq<PrepareRequestMessage>(GetConnectionId(), create_schema_info->ToString());
-	auto create_respose = GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
-	return make_uniq_base<CatalogEntry, QuackSchemaCatalogEntry>(*this, create_schema_info->Cast<CreateSchemaInfo>());
-	return nullptr;
+	throw InternalException("FIXME: create schema");
+	// auto create_schema_info = info.Copy();
+	// // TODO this does not make too much sense?
+	// create_schema_info->catalog = "memory";
+	//
+	// auto create_request = make_uniq<PrepareRequestMessage>(GetConnectionId(), create_schema_info->ToString());
+	// auto create_respose = GetRawClient().Request<PrepareResponseMessage>(std::move(create_request));
+	// return make_uniq_base<CatalogEntry, QuackSchemaCatalogEntry>(*this,
+	// create_schema_info->Cast<CreateSchemaInfo>()); return nullptr;
 }
 
 void QuackCatalog::ScanSchemas(ClientContext &context, std::function<void(SchemaCatalogEntry &)> callback) {
-	for (auto &schema : schemas) {
-		// callback(*schema.second);
+	for (auto &schema : schemas->GetAllCatalogEntries()) {
+		callback(schema.get().Cast<SchemaCatalogEntry>());
 	}
 }
 
@@ -147,120 +147,4 @@ void QuackCatalog::DropSchema(ClientContext &context, DropInfo &info) {
 	throw NotImplementedException("DropSchema not implemented yet");
 }
 
-void QuackSchemaCatalogEntry::Scan(ClientContext &context, CatalogType type,
-                                   const std::function<void(CatalogEntry &)> &callback) {
-	// TODO
-}
-void QuackSchemaCatalogEntry::Scan(CatalogType type, const std::function<void(CatalogEntry &)> &callback) {
-	// TODO
-}
-
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
-                                                                TableCatalogEntry &table) {
-	throw NotImplementedException("CreateIndex not implemented yet");
-}
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateFunction(CatalogTransaction transaction,
-                                                                   CreateFunctionInfo &info) {
-	throw NotImplementedException("CreateFunction not implemented yet");
-}
-
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateTable(CatalogTransaction transaction,
-                                                                BoundCreateTableInfo &info) {
-	auto &quack_catalog = catalog.Cast<QuackCatalog>();
-
-	auto create_table_info = info.Base().Copy();
-	create_table_info->catalog = GetInfo()->catalog;
-	create_table_info->schema = GetInfo()->schema;
-
-	auto create_message =
-	    make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), create_table_info->ToString());
-	auto create_response = quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(create_message));
-	return make_uniq_base<CatalogEntry, QuackTableCatalogEntry>(catalog, *this,
-	                                                            create_table_info->Cast<CreateTableInfo>());
-}
-
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
-	throw NotImplementedException("CreateView not implemented yet");
-}
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateSequence(CatalogTransaction transaction,
-                                                                   CreateSequenceInfo &info) {
-	throw NotImplementedException("CreateSequence not implemented yet");
-}
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateTableFunction(CatalogTransaction transaction,
-                                                                        CreateTableFunctionInfo &info) {
-	throw NotImplementedException("CreateTableFunction not implemented yet");
-}
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateCopyFunction(CatalogTransaction transaction,
-                                                                       CreateCopyFunctionInfo &info) {
-	throw NotImplementedException("CreateCopyFunction not implemented yet");
-}
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreatePragmaFunction(CatalogTransaction transaction,
-                                                                         CreatePragmaFunctionInfo &info) {
-	throw NotImplementedException("CreatePragmaFunction not implemented yet");
-}
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateCollation(CatalogTransaction transaction,
-                                                                    CreateCollationInfo &info) {
-	throw NotImplementedException("CreateCollation not implemented yet");
-}
-
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateType(CatalogTransaction transaction, CreateTypeInfo &info) {
-	throw NotImplementedException("CreateType not implemented yet");
-}
-
-void QuackSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p) {
-	auto &quack_catalog = catalog.Cast<QuackCatalog>();
-	auto drop_info = info_p.Copy();
-	drop_info->catalog = GetInfo()->catalog;
-	drop_info->schema = GetInfo()->schema;
-
-	auto drop_message = make_uniq<PrepareRequestMessage>(quack_catalog.GetConnectionId(), drop_info->ToString());
-
-	quack_catalog.GetRawClient().Request<PrepareResponseMessage>(std::move(drop_message));
-}
-void QuackSchemaCatalogEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
-	throw NotImplementedException("Alter not implemented yet, Alter!");
-}
-
-unique_ptr<BaseStatistics> QuackTableCatalogEntry::GetStatistics(ClientContext &context, column_t column_id) {
-	throw NotImplementedException("GetStatistics not implemented yet");
-}
-
-TableStorageInfo QuackTableCatalogEntry::GetStorageInfo(ClientContext &context) {
-	throw NotImplementedException("GetStorageInfo not implemented yet");
-}
-
-// clang-format off
-static const DefaultTableMacro quack_table_macros[] = {
-	{DEFAULT_SCHEMA, "query", {"remote_sql_query", nullptr}, {{nullptr, nullptr}},  "FROM quack_query_by_name({CATALOG}, remote_sql_query)"},
-	{nullptr, nullptr, {nullptr}, {{nullptr, nullptr}}, nullptr}
-};
-// clang-format on
-
-// 'borrowed' from ducklake
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LoadBuiltInFunction(DefaultTableMacro macro) {
-	string macro_def = macro.macro;
-	macro_def = StringUtil::Replace(macro_def, "{CATALOG}", KeywordHelper::WriteQuoted(catalog.GetName(), '\''));
-	macro_def = StringUtil::Replace(macro_def, "{SCHEMA}", KeywordHelper::WriteQuoted(name, '\''));
-	macro.macro = macro_def.c_str();
-	auto info = DefaultTableFunctionGenerator::CreateTableMacroInfo(macro);
-	auto table_macro =
-	    make_uniq_base<CatalogEntry, TableMacroCatalogEntry>(catalog, *this, info->Cast<CreateMacroInfo>());
-	auto result = table_macro.get();
-	default_function_map.emplace(macro.name, std::move(table_macro));
-	return result;
-}
-
-optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::TryLoadBuiltInFunction(const string &entry_name) {
-	lock_guard<mutex> guard(default_function_lock);
-	auto entry = default_function_map.find(entry_name);
-	if (entry != default_function_map.end()) {
-		return entry->second.get();
-	}
-	for (idx_t index = 0; quack_table_macros[index].name != nullptr; index++) {
-		if (StringUtil::CIEquals(quack_table_macros[index].name, entry_name)) {
-			return LoadBuiltInFunction(quack_table_macros[index]);
-		}
-	}
-	return nullptr;
-}
 } // namespace duckdb

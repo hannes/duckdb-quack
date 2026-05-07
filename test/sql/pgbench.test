@@ -53,7 +53,7 @@ endloop
 query I con2
 select count(*) from duckdb_logs where type = 'Quack' and scope = 'CONNECTION'
 ----
-30
+10
 
 
 statement ok con1

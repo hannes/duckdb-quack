@@ -12,8 +12,18 @@
 #include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 
 namespace duckdb {
-
 class QuackCatalog;
+class QuackSchemaCatalogEntry;
+
+class QuackTableSet : public QuackCatalogSet {
+public:
+	QuackTableSet(ClientContext &context, QuackSchemaCatalogEntry &parent, const QuackLoadCatalogData &load_data);
+
+	static string GetLoadQuery();
+
+private:
+	QuackSchemaCatalogEntry &schema;
+};
 
 class QuackTableCatalogEntry : public TableCatalogEntry {
 public:
