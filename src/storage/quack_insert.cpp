@@ -60,7 +60,7 @@ SinkResultType QuackInsert::Sink(ExecutionContext &context, DataChunk &chunk, Op
 	auto chunk_wrapper = make_uniq<DataChunkWrapper>(*append_chunk);
 	auto append_message = make_uniq<AppendRequestMessage>(quack_catalog.GetConnectionId(), tbl.schema.name, tbl.name,
 	                                                      std::move(chunk_wrapper));
-	quack_catalog.GetRawClient().Request<AppendResponseMessage>(std::move(append_message));
+	quack_catalog.GetRawClient().Request<AppendResponseMessage>(context.client, std::move(append_message));
 	global_state.insert_count += chunk.size();
 	return SinkResultType::NEED_MORE_INPUT;
 }

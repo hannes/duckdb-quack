@@ -34,6 +34,7 @@ ORDER BY ALL
 
 QuackSchemaCatalogEntry::QuackSchemaCatalogEntry(Catalog &catalog_p, CreateSchemaInfo &info_p)
     : SchemaCatalogEntry(catalog_p, info_p) {
+	tables = make_uniq<QuackTableSet>(*this);
 }
 
 QuackSchemaCatalogEntry::QuackSchemaCatalogEntry(ClientContext &context, Catalog &catalog_p, CreateSchemaInfo &info_p,

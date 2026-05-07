@@ -52,7 +52,8 @@ QuackTransaction &QuackTransaction::Get(CatalogTransaction transaction) {
 
 unique_ptr<ColumnDataCollection> QuackTransaction::Query(const string &query) {
 	ForceStart();
-	return quack_catalog.ExecuteCommandInternal(query);
+	auto context_ref = context.lock();
+	return quack_catalog.ExecuteCommandInternal(query, context_ref.get());
 }
 
 } // namespace duckdb

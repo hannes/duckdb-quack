@@ -37,18 +37,19 @@ QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri_p,
 		    "Could not find token for ATTACH 'quack:...' - Please create a secret first or pass directly");
 	}
 
-	auto connection_response = client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
+	auto connection_response =
+	    client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
 	connection_id = connection_response->ConnectionId();
 
 	// load the entire catalog up-front
-	auto load_info = LoadCatalog();
+	auto load_info = LoadCatalog(context);
 	schemas = make_uniq<QuackSchemaSet>(context, *this, load_info);
 }
 
-QuackLoadCatalogData QuackCatalog::LoadCatalog() {
+QuackLoadCatalogData QuackCatalog::LoadCatalog(ClientContext &context) {
 	QuackLoadCatalogData result;
-	result.schemas = ExecuteCommandInternal(QuackSchemaSet::GetLoadQuery());
-	result.tables = ExecuteCommandInternal(QuackTableSet::GetLoadQuery());
+	result.schemas = ExecuteCommandInternal(QuackSchemaSet::GetLoadQuery(), context);
+	result.tables = ExecuteCommandInternal(QuackTableSet::GetLoadQuery(), context);
 	return result;
 }
 
@@ -79,10 +80,12 @@ const QuackUri &QuackCatalog::GetServerUri() {
 	return server_uri;
 }
 
-unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const string &query) {
+unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const string &query,
+                                                                      optional_ptr<ClientContext> context) {
 	// FIXME this will break with many results!
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
-	auto response = client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(connection_id, query));
+	auto response =
+	    client->Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(connection_id, query));
 	chunk_collection->Initialize(response->Types());
 	for (auto &chunk : response->MutableResults()) {
 		chunk_collection->Append(chunk->Chunk());

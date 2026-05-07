@@ -61,6 +61,10 @@ QuackTableSet::QuackTableSet(ClientContext &context, QuackSchemaCatalogEntry &pa
 	}
 }
 
+QuackTableSet::QuackTableSet(QuackSchemaCatalogEntry &parent)
+    : QuackCatalogSet(parent.ParentCatalog().Cast<QuackCatalog>()), schema(parent) {
+}
+
 string QuackTableSet::GetLoadQuery() {
 	return R"(
 SELECT schema_name, sql, 'table'

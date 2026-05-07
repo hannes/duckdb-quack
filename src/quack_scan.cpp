@@ -58,11 +58,11 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	}
 
 	auto connection_request_response =
-	    initial_client->Request<ConnectionResponseMessage>(make_uniq<ConnectionRequestMessage>(token));
+	    initial_client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
 	bind_data->connection_id = connection_request_response->ConnectionId();
 
 	auto bind_response = initial_client->Request<PrepareResponseMessage>(
-	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	    context, make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -110,7 +110,7 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	bind_data->connection_id = catalog.GetConnectionId();
 
 	auto bind_response = catalog.GetRawClient().Request<PrepareResponseMessage>(
-	    make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	    context, make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -182,36 +182,6 @@ private:
 	mutex lock;
 	vector<ChunkResult> results;
 };
-
-static bool CanPushdownFilter(const TableFilter &filter) {
-	switch (filter.filter_type) {
-	case TableFilterType::CONSTANT_COMPARISON:
-	case TableFilterType::IS_NULL:
-	case TableFilterType::IS_NOT_NULL:
-	case TableFilterType::IN_FILTER:
-		return true;
-	case TableFilterType::CONJUNCTION_AND: {
-		auto &conjunction = filter.Cast<ConjunctionAndFilter>();
-		for (auto &child : conjunction.child_filters) {
-			if (!CanPushdownFilter(*child)) {
-				return false;
-			}
-		}
-		return true;
-	}
-	case TableFilterType::CONJUNCTION_OR: {
-		auto &conjunction = filter.Cast<ConjunctionOrFilter>();
-		for (auto &child : conjunction.child_filters) {
-			if (!CanPushdownFilter(*child)) {
-				return false;
-			}
-		}
-		return true;
-	}
-	default:
-		return false;
-	}
-}
 
 static string BuildPushdownQuery(const QuackScanBindData &bind_data, const TableFunctionInitInput &input) {
 	string query;
@@ -295,8 +265,8 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 		// apply pushdown to the query
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = QuackClient::GetClient(context, bind_data.server_uri);
-		auto response_message =
-		    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query));
+		auto response_message = client->Request<PrepareResponseMessage>(
+		    context, make_uniq<PrepareRequestMessage>(bind_data.connection_id, query));
 		needs_more_fetch = response_message->NeedsMoreFetch();
 		// fetch the result
 		for (auto &chunk_ref : response_message->MutableResults()) {
@@ -368,7 +338,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 		// if that did not work, we request more results
 		if (local_state.results.empty() && global_state.needs_more_fetch) {
 			auto fetch_response = local_state.client->Request<FetchResponseMessage>(
-			    make_uniq<FetchRequestMessage>(bind_data.connection_id));
+			    context, make_uniq<FetchRequestMessage>(bind_data.connection_id));
 
 			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done

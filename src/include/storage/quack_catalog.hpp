@@ -52,7 +52,7 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
-	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(const string &query);
+	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(const string &query, optional_ptr<ClientContext> context);
 	const QuackUri &GetServerUri();
 	const string &GetConnectionId();
 
@@ -61,7 +61,7 @@ public:
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
 
-	QuackLoadCatalogData LoadCatalog();
+	QuackLoadCatalogData LoadCatalog(ClientContext &context);
 
 private:
 	QuackUri server_uri;
