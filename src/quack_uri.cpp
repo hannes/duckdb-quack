@@ -61,11 +61,9 @@ QuackUri::QuackUri(string uri_p, bool ssl_p) : ssl(ssl_p), uri(uri_p) {
 }
 
 static void QuackUriParser(const DataChunk &args, ExpressionState &, Vector &result) {
-	D_ASSERT(args.size() == 2);
-	D_ASSERT(args.GetTypes()[0].id() == LogicalTypeId::VARCHAR);
-	D_ASSERT(args.GetTypes()[1].id() == LogicalTypeId::BOOLEAN);
-	D_ASSERT(result.GetType().id() == LogicalTypeId::STRUCT);
-
+	if (!args.AllConstant()) {
+		throw InvalidInputException("quack_uri_parser expects all arguments to be constant");
+	}
 	QuackUri parsed(args.GetValue(0, 0).GetValue<string>(), args.GetValue(1, 0).GetValue<bool>());
 
 	result.SetValue(0, Value::STRUCT({{"host", Value(parsed.Host())},
@@ -73,6 +71,7 @@ static void QuackUriParser(const DataChunk &args, ExpressionState &, Vector &res
 	                                  {"ipv6", Value::BOOLEAN(parsed.IPv6())},
 	                                  {"ssl", Value::BOOLEAN(parsed.Ssl())},
 	                                  {"url", Value(parsed.Http())}}));
+	result.SetVectorType(VectorType::CONSTANT_VECTOR);
 }
 
 // just for testing

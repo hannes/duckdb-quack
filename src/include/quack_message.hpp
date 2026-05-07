@@ -117,8 +117,9 @@ public:
 
 	PrepareResponseMessage(const vector<LogicalType> &types_p, const vector<string> &names_p,
 	                       vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p)
-	    : QuackMessage(TYPE), result_types(types_p), result_names(names_p), needs_more_fetch(needs_more_fetch_p),
-	      results(std::move(results_p)) {};
+	    : QuackMessage(TYPE), result_types(types_p), result_names(names_p), results(std::move(results_p)),
+	      needs_more_fetch(needs_more_fetch_p) {
+	}
 
 	const vector<LogicalType> &Types() const {
 		return result_types;
@@ -151,7 +152,7 @@ class ConnectionRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CONNECTION_REQUEST;
 
-	ConnectionRequestMessage(const string &auth_string_p) : QuackMessage(TYPE), auth_string(auth_string_p) {
+	explicit ConnectionRequestMessage(const string &auth_string_p) : QuackMessage(TYPE), auth_string(auth_string_p) {
 	}
 	const std::string &AuthString() const {
 		return auth_string;
