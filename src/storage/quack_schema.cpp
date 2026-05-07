@@ -3,10 +3,11 @@
 #include "storage/quack_table.hpp"
 #include "quack_client.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
-#include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/planner/parsed_data/bound_create_table_info.hpp"
 #include "duckdb/catalog/catalog_entry/table_macro_catalog_entry.hpp"
 #include "storage/quack_transaction.hpp"
+#include "storage/quack_view.hpp"
 
 namespace duckdb {
 
@@ -52,6 +53,7 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::LookupEntry(CatalogTransacti
 	case CatalogType::TABLE_FUNCTION_ENTRY:
 		return TryLoadBuiltInFunction(entry_name);
 	case CatalogType::TABLE_ENTRY:
+	case CatalogType::VIEW_ENTRY:
 		return tables->GetEntry(lookup_info.GetEntryName());
 	default:
 		return nullptr;
@@ -88,7 +90,20 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateTable(CatalogTransacti
 }
 
 optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
-	throw NotImplementedException("CreateView not implemented yet");
+	auto create_view_info = info.Copy();
+	create_view_info->catalog = GetInfo()->catalog;
+	create_view_info->schema = GetInfo()->schema;
+
+	// create the view verbatim in the serer
+	auto &quack_transaction = QuackTransaction::Get(transaction);
+	quack_transaction.Query(create_view_info->ToString());
+
+	// locally, override the query with a remote procedure call to ensure the view is evaluated remotely
+	info.sql = QuackViewCatalogEntry::CreateViewSQL(ParentCatalog().GetName(), name, info.view_name);
+	info.query = CreateViewInfo::ParseSelect(info.sql);
+
+	auto quack_entry = make_uniq<QuackViewCatalogEntry>(catalog, *this, info);
+	return tables->CreateEntry(std::move(quack_entry), info.on_conflict);
 }
 optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateSequence(CatalogTransaction transaction,
                                                                    CreateSequenceInfo &info) {
@@ -118,9 +133,10 @@ optional_ptr<CatalogEntry> QuackSchemaCatalogEntry::CreateType(CatalogTransactio
 void QuackSchemaCatalogEntry::DropEntry(ClientContext &context, DropInfo &info_p) {
 	auto drop_info = info_p.Copy();
 	drop_info->catalog = GetInfo()->catalog;
-	drop_info->schema = GetInfo()->schema;
+	drop_info->schema = name;
 	switch (drop_info->type) {
 	case CatalogType::TABLE_ENTRY:
+	case CatalogType::VIEW_ENTRY:
 		break;
 	default:
 		throw NotImplementedException("Drop not supported yet for this entry");
