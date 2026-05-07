@@ -12,6 +12,7 @@
 
 #include <queue>
 namespace duckdb {
+
 static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunctionBindInput &input,
                                               vector<LogicalType> &return_types, vector<string> &names) {
 	// Set logging to be pretty verbose (everything except message payloads)
@@ -120,6 +121,27 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 	return bind_data;
 }
 
+enum class ChunkResultPushdownType { REQUIRES_PUSHDOWN, PUSHDOWN_ALREADY_APPLIED };
+
+class ChunkResult {
+public:
+	explicit ChunkResult(DataChunk &chunk_p, ChunkResultPushdownType pushdown_type_p) : pushdown_type(pushdown_type_p) {
+		chunk = make_uniq<DataChunk>();
+		chunk->InitializeEmpty(chunk_p.GetTypes());
+		chunk->Reference(chunk_p);
+	}
+	DataChunk &Chunk() {
+		return *chunk;
+	}
+	bool RequiresPushdown() const {
+		return pushdown_type == ChunkResultPushdownType::REQUIRES_PUSHDOWN;
+	}
+
+private:
+	unique_ptr<DataChunk> chunk;
+	ChunkResultPushdownType pushdown_type;
+};
+
 struct QuackScanLocalState : public LocalTableFunctionState {
 	unique_ptr<QuackClient> client;
 	//! batch_index of the batch that `fetched_results` currently holds chunks from (server-assigned).
@@ -127,7 +149,7 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 	//! (CTAS, COPY TO, INSERT SELECT) can run the scan in parallel without losing order.
 	optional_idx current_batch_index;
 
-	queue<unique_ptr<DataChunkWrapper>> results;
+	queue<ChunkResult> results;
 	ColumnDataScanState scan_state;
 
 	explicit QuackScanLocalState() {
@@ -138,7 +160,7 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 
 struct QuackScanGlobalState : GlobalTableFunctionState {
 	explicit QuackScanGlobalState(vector<ColumnIndex> column_ids_p, vector<idx_t> projection_id_p,
-	                              vector<unique_ptr<DataChunkWrapper>> results_p, bool needs_more_fetch_p)
+	                              vector<ChunkResult> results_p, bool needs_more_fetch_p)
 	    : max_threads(needs_more_fetch_p ? MAX_THREADS : 1), column_ids(std::move(column_ids_p)),
 	      projection_ids(std::move(projection_id_p)), needs_more_fetch(needs_more_fetch_p),
 	      results(std::move(results_p)) {
@@ -151,14 +173,14 @@ struct QuackScanGlobalState : GlobalTableFunctionState {
 	vector<idx_t> projection_ids;
 	atomic<bool> needs_more_fetch;
 
-	vector<unique_ptr<DataChunkWrapper>> TryGetResults() {
+	vector<ChunkResult> TryGetResults() {
 		lock_guard<mutex> guard(lock);
 		return std::move(results);
 	}
 
 private:
 	mutex lock;
-	vector<unique_ptr<DataChunkWrapper>> results;
+	vector<ChunkResult> results;
 };
 
 static bool CanPushdownFilter(const TableFilter &filter) {
@@ -197,7 +219,19 @@ static string BuildPushdownQuery(const QuackScanBindData &bind_data, const Table
 	// Projection: select only the columns DuckDB actually needs in the output.
 	// With filter_prune, projection_ids indexes into column_ids for output columns only.
 	// Filter-only columns are in column_ids but NOT in projection_ids — they go in WHERE, not SELECT.
-	// if (!input.column_ids.empty() && !bind_data.column_names.empty()) {
+	if (!input.column_indexes.empty()) {
+		for (auto &col_id : input.column_indexes) {
+			if (!query.empty()) {
+				query += ", ";
+			}
+			if (col_id.IsVirtualColumn()) {
+				query += "NULL";
+			} else {
+				query += "#" + to_string(col_id.GetPrimaryIndex() + 1);
+			}
+		}
+		query = "SELECT " + query;
+	}
 	// 	vector<string> selected_columns;
 	// 	if (!input.projection_ids.empty()) {
 	// 		for (auto &proj_id : input.projection_ids) {
@@ -250,19 +284,24 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 	// For the catalog path (ATTACH), LookupEntry only prepares without executing
 	// to avoid the server-side result being overwritten by subsequent lookups.
 	// We execute the query here, right before scanning, so the result is fresh.
-	vector<unique_ptr<DataChunkWrapper>> results;
+	vector<ChunkResult> results;
 	bool needs_more_fetch = bind_data.needs_more_fetch;
 	if (!bind_data.table_name.empty()) {
+		// apply pushdown to the query
 		auto query = BuildPushdownQuery(bind_data, input);
 		auto client = QuackClient::GetClient(context, bind_data.server_uri);
 		auto response_message =
 		    client->Request<PrepareResponseMessage>(make_uniq<PrepareRequestMessage>(bind_data.connection_id, query));
 		needs_more_fetch = response_message->NeedsMoreFetch();
-		results = std::move(response_message->MutableResults());
+		// fetch the result
+		for (auto &chunk_ref : response_message->MutableResults()) {
+			auto &chunk = chunk_ref->Chunk();
+			results.emplace_back(chunk, ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
+		}
 	} else {
 		for (auto &chunk_ref : bind_data.results) {
 			auto &chunk = chunk_ref->Chunk();
-			results.push_back(make_uniq<DataChunkWrapper>(chunk));
+			results.emplace_back(chunk, ChunkResultPushdownType::REQUIRES_PUSHDOWN);
 		}
 	}
 
@@ -296,43 +335,29 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 
 	while (true) {
 		// first we try to scan from our local results buffer if we have any
-		if (!local_state.results.empty()) {
+		while (!local_state.results.empty()) {
 			auto chunk = std::move(local_state.results.front());
 			local_state.results.pop();
 
-			auto &response_chunk = chunk->Chunk();
-			const auto &col_ids = global_state.column_ids;
-			const auto &proj_ids = global_state.projection_ids;
-			if (response_chunk.ColumnCount() == output.ColumnCount() && col_ids.empty() && proj_ids.empty()) {
-				output.Reference(response_chunk);
-			} else {
-				// Map each output column to the right response column. DuckDB's pushdown contract:
-				//   - column_ids lists which source columns the scan should read (in that order).
-				//   - projection_ids (when filter_prune=true) indexes into column_ids for the outputs.
-				// The server ignores pushdown and returns every column, so we apply both hops here.
-				for (idx_t i = 0; i < output.ColumnCount(); i++) {
-					ColumnIndex index;
-					if (!proj_ids.empty()) {
-						index = col_ids[proj_ids[i]];
-					} else if (!col_ids.empty()) {
-						index = col_ids[i];
-					} else {
-						index = ColumnIndex(i);
+			auto &response_chunk = chunk.Chunk();
+			if (response_chunk.size() > 0) {
+				if (!chunk.RequiresPushdown()) {
+					output.Reference(response_chunk);
+				} else {
+					for (idx_t i = 0; i < global_state.column_ids.size(); i++) {
+						auto &index = global_state.column_ids[i];
+						if (index.IsVirtualColumn()) {
+							// TODO
+							output.data[i].Reference(Value(output.data[i].GetType()));
+							return;
+						}
+						auto col_idx = index.GetPrimaryIndex();
+						output.data[i].Reference(response_chunk.data[col_idx]);
 					}
-					if (index.IsVirtualColumn()) {
-						// TODO
-						output.data[i].Reference(Value(output.data[i].GetType()));
-						return;
-					}
-					auto col_idx = index.GetPrimaryIndex();
-					D_ASSERT(col_idx < response_chunk.ColumnCount());
-					D_ASSERT(response_chunk.data[col_idx].GetType() == output.data[i].GetType());
-					output.data[i].Reference(response_chunk.data[col_idx]);
+					output.SetCardinality(response_chunk.size());
 				}
+				return;
 			}
-			output.SetCardinality(response_chunk.size());
-
-			return;
 		}
 
 		// if that did not work, we request more results
@@ -347,7 +372,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 			}
 			// set up buffer for scan in next iteration
 			for (auto &chunk : fetch_response->MutableResults()) {
-				local_state.results.push(std::move(chunk));
+				local_state.results.emplace(chunk->Chunk(), ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
 			}
 			local_state.current_batch_index = fetch_response->BatchIndex();
 			continue;
