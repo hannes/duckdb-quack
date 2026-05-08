@@ -263,7 +263,6 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 			results.emplace_back(chunk, ChunkResultPushdownType::REQUIRES_PUSHDOWN);
 		}
 	}
-
 	// we only multithread if there is more to fetch
 	return make_uniq<QuackScanGlobalState>(input.column_indexes, input.projection_ids, std::move(results),
 	                                       needs_more_fetch);
@@ -392,4 +391,9 @@ TableFunction QuackScanByNameFunction::GetFunction() {
 	// fun.filter_prune = true;
 	return fun;
 }
+
+bool QuackCatalog::IsQuackScan(const string &name) {
+	return name == "quack_query" || name == "quack_query_by_name";
+}
+
 } // namespace duckdb
