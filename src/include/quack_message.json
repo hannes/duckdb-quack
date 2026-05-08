@@ -52,7 +52,11 @@
     ]
   },
   {
-    "class": "AppendResponseMessage",
+    "class": "SuccessResponse",
+    "members": []
+  },
+  {
+    "class": "DisconnectMessage",
     "members": []
   },
   {

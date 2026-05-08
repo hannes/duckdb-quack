@@ -14,7 +14,12 @@
 #include "quack_log.hpp"
 #include "quack_storage.hpp"
 
-using namespace duckdb;
+namespace duckdb {
+QuackConnection::QuackConnection(string session_id_p) : session_id(std::move(session_id_p)) {
+}
+
+QuackConnection::~QuackConnection() {
+}
 
 void QuackServer::ValidateToken(const string &token) {
 	if (token.size() < 4) {
@@ -30,11 +35,11 @@ QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const 
 QuackServer::~QuackServer() {
 }
 
-optional_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
+shared_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
 	auto it = active_connections.find(connection_id);
 	if (it != active_connections.end()) {
-		return it->second.get();
+		return it->second;
 	}
 	return nullptr;
 }
@@ -48,12 +53,24 @@ string QuackServer::CreateNewConnection(const string &session_id) {
 	if (!db) {
 		throw InternalException("Database was closed");
 	}
-	auto new_connection = make_uniq<QuackConnection>();
+	auto new_connection = make_shared_ptr<QuackConnection>(session_id);
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
 	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
 	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
 	active_connections[session_id] = std::move(new_connection);
 	return session_id;
+}
+
+bool QuackServer::DisconnectConnection(const string &session_id) {
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+
+	auto entry = active_connections.find(session_id);
+	if (entry == active_connections.end()) {
+		// unknown client
+		return false;
+	}
+	active_connections.erase(entry);
+	return true;
 }
 
 static string GetSettingString(DatabaseInstance &db, const string &setting_name) {
@@ -137,6 +154,7 @@ bool ServerSupportsMessage(MessageType type) {
 	case MessageType::PREPARE_REQUEST:
 	case MessageType::FETCH_REQUEST:
 	case MessageType::APPEND_REQUEST:
+	case MessageType::DISCONNECT_MESSAGE:
 		return true;
 	default:
 		return false;
@@ -182,7 +200,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 
 	// if the message requires it, obtain a connection
 	// these are basically all messages aside from connect request
-	optional_ptr<QuackConnection> connection;
+	shared_ptr<QuackConnection> connection;
 	if (MessageRequiresConnection(header.type)) {
 		connection = GetConnection(header.connection_id);
 		if (!connection) {
@@ -246,6 +264,13 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			return make_uniq<ErrorResponse>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
+	}
+	case MessageType::DISCONNECT_MESSAGE: {
+		auto &connection = *connection_p;
+		if (!DisconnectConnection(connection.session_id)) {
+			return make_uniq<ErrorResponse>("Connection does not exist / already disconnected");
+		}
+		return make_uniq<SuccessResponse>();
 	}
 	case MessageType::PREPARE_REQUEST: {
 		auto &prepare_request_message = received_message.Cast<PrepareRequestMessage>();
@@ -351,7 +376,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
 		collection.Append(append_request_message.AppendChunk());
 		connection.duckdb_connection->Append(*table_info, collection);
-		return make_uniq<AppendResponseMessage>();
+		return make_uniq<SuccessResponse>();
 	}
 	default: {
 		return make_uniq<ErrorResponse>(
@@ -359,3 +384,4 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	}
 	}
 }
+} // namespace duckdb

@@ -21,11 +21,15 @@ class PreparedStatement;
 class EncryptionState;
 
 struct QuackConnection {
+	explicit QuackConnection(string session_id_p);
+	~QuackConnection();
+
 	mutex lock;
 	unique_ptr<Connection> duckdb_connection;
 	unique_ptr<QueryResult> duckdb_query_result;
 	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
 	idx_t next_batch_index = 0;
+	string session_id;
 };
 
 class QuackServer {
@@ -43,8 +47,9 @@ public:
 	//! listen-loop teardown joins all workers, which would deadlock.
 	virtual void Close() {};
 
-	optional_ptr<QuackConnection> GetConnection(const string &connection_id);
+	shared_ptr<QuackConnection> GetConnection(const string &connection_id);
 	string CreateNewConnection(const string &session_id);
+	bool DisconnectConnection(const string &session_id);
 	// TODO need something to destroy connections
 
 	string GenerateSessionId();
@@ -71,7 +76,7 @@ protected:
 
 	weak_ptr<DatabaseInstance> db_ptr;
 	mutex active_connections_mutex;
-	unordered_map<string, unique_ptr<QuackConnection>> active_connections;
+	unordered_map<string, shared_ptr<QuackConnection>> active_connections;
 
 	mutex session_id_rng_mutex;
 	shared_ptr<EncryptionState> session_id_rng;
