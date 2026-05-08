@@ -125,6 +125,11 @@ private:
 };
 
 struct QuackScanLocalState : public LocalTableFunctionState {
+	explicit QuackScanLocalState() {
+	}
+	~QuackScanLocalState() override {
+	}
+
 	unique_ptr<QuackClientWrapper> client_wrapper;
 	//! batch_index of the batch that `fetched_results` currently holds chunks from (server-assigned).
 	//! Surfaced to DuckDB via get_partition_data so downstream order-preserving operators
@@ -133,11 +138,6 @@ struct QuackScanLocalState : public LocalTableFunctionState {
 
 	queue<ChunkResult> results;
 	ColumnDataScanState scan_state;
-
-	explicit QuackScanLocalState() {
-	}
-	~QuackScanLocalState() override {
-	}
 };
 
 struct QuackScanGlobalState : GlobalTableFunctionState {
