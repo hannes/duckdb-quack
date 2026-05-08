@@ -55,8 +55,9 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 
 	try {
 		response = http_util.Request(post_request);
-	} catch (std::exception &e) {
-		throw IOException("Failed to send message: %s", e.what());
+	} catch (std::exception &ex) {
+		ErrorData error(ex);
+		throw IOException("Failed to send message: %s", error.Message());
 	}
 	if (!response || !response->Success()) {
 		string error = response ? response->GetError() : "no response";
