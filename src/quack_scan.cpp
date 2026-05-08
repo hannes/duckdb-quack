@@ -54,6 +54,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 
 	bind_data->results = std::move(bind_response->MutableResults());
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
+	bind_data->result_uuid = bind_response->ResultUUID();
 
 	return bind_data;
 }
@@ -319,7 +320,8 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 		if (local_state.results.empty() && global_state.needs_more_fetch) {
 			auto &client = local_state.client_wrapper->GetClient();
 			auto fetch_response = client.Request<FetchResponseMessage>(
-			    context, make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId()));
+			    context,
+			    make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId(), bind_data.result_uuid));
 
 			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done

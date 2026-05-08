@@ -29,6 +29,8 @@ struct QuackConnection {
 	unique_ptr<QueryResult> duckdb_query_result;
 	//! Monotonic counter assigned per FETCH batch — enables order-preserving parallel scans on
 	idx_t next_batch_index = 1;
+	//! Current result UUID
+	hugeint_t result_uuid;
 	string session_id;
 };
 
