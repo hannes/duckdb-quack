@@ -36,6 +36,9 @@ struct QuackConnection {
 
 class QuackServer {
 public:
+	static constexpr const idx_t QUACK_VERSION = 1;
+
+public:
 	explicit QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p);
 	virtual ~QuackServer();
 

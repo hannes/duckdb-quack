@@ -189,12 +189,23 @@ class ConnectionRequestMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CONNECTION_REQUEST;
 
-	explicit ConnectionRequestMessage(const string &auth_string_p) : QuackMessage(TYPE), auth_string(auth_string_p) {
-	}
+	explicit ConnectionRequestMessage(const string &auth_string_p);
 
 public:
 	const string &AuthString() const {
 		return auth_string;
+	}
+	const string &ClientVersion() const {
+		return client_duckdb_version;
+	}
+	const string &ClientPlatform() const {
+		return client_platform;
+	}
+	const idx_t MinimumSupportedQuackVersion() const {
+		return min_supported_quack_version;
+	}
+	const idx_t MaximumSupportedQuackVersion() const {
+		return max_supported_quack_version;
 	}
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ConnectionRequestMessage> Deserialize(Deserializer &deserializer);
@@ -205,22 +216,40 @@ protected:
 
 private:
 	string auth_string;
+	string client_duckdb_version;
+	string client_platform;
+	idx_t min_supported_quack_version;
+	idx_t max_supported_quack_version;
 };
 
 class ConnectionResponseMessage : public QuackMessage {
 public:
 	static constexpr MessageType TYPE = MessageType::CONNECTION_RESPONSE;
 
-	explicit ConnectionResponseMessage(string connection_id_p) : QuackMessage(TYPE, std::move(connection_id_p)) {
-	}
+	explicit ConnectionResponseMessage(string connection_id_p);
 
 protected:
 	ConnectionResponseMessage() : QuackMessage(TYPE) {
 	}
 
 public:
+	const string &ServerVersion() const {
+		return server_duckdb_version;
+	}
+	const string &ServerPlatform() const {
+		return server_platform;
+	}
+	idx_t QuackVersion() const {
+		return quack_version;
+	}
+
 	void Serialize(Serializer &serializer) const override;
 	static unique_ptr<ConnectionResponseMessage> Deserialize(Deserializer &deserializer);
+
+private:
+	string server_duckdb_version;
+	string server_platform;
+	idx_t quack_version;
 };
 
 class FetchRequestMessage : public QuackMessage {
