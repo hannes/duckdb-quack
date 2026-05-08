@@ -323,7 +323,6 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	}
 
 	case MessageType::FETCH_REQUEST: {
-		auto &fetch_request_message = received_message.Cast<FetchRequestMessage>();
 		auto &connection = *connection_p;
 		std::unique_lock<std::mutex> lock(connection.lock);
 
@@ -355,8 +354,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 
 		// we never execute this query, but throw it at the authorization function so it can check if this user gets to
 		// insert into this table
-		auto dummy_insert_query = "INSERT INTO " + append_request_message.SchemaName() + "." +
-		                          append_request_message.TableName() + " VALUES (NULL)";
+		auto dummy_insert_query =
+		    StringUtil::Format("INSERT INTO %s.%s VALUES (NULL)", SQLIdentifier(append_request_message.SchemaName()),
+		                       SQLIdentifier(append_request_message.TableName()));
 
 		// TODO do not do this if there is no fun set
 		if (!EvaluateAuthQuery(
@@ -373,9 +373,14 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 			                                SQLIdentifier(append_request_message.SchemaName()),
 			                                SQLIdentifier(append_request_message.TableName()));
 		}
-		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
-		collection.Append(append_request_message.AppendChunk());
-		connection.duckdb_connection->Append(*table_info, collection);
+		try {
+			ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
+			collection.Append(append_request_message.AppendChunk());
+			connection.duckdb_connection->Append(*table_info, collection);
+		} catch (std::exception &ex) {
+			// apend failed - directly pass error to user
+			return make_uniq<ErrorResponse>(ErrorData(ex));
+		}
 		return make_uniq<SuccessResponse>();
 	}
 	default: {

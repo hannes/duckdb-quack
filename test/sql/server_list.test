@@ -1,6 +1,6 @@
 # name: test/sql/server_list.test
 # description: quack_server_list returns rows for active servers
-# group: [quack]
+# group: [sql]
 
 require quack
 
