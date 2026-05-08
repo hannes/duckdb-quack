@@ -40,8 +40,14 @@ HttpQuackServer::~HttpQuackServer() {
 void HttpQuackServer::ListenThread(HttpQuackServer *server, const string &listen_host, int listen_port) {
 	D_ASSERT(server->server);
 	D_ASSERT(listen_port > 1 && listen_port < 65535);
-	// Socket is already bound (synchronously, in the constructor)
-	server->server->listen_after_bind();
+	// Socket is already bound (synchronously, in the constructor).
+	// Catch everything so the listener thread never lets an exception escape — that
+	// would call std::terminate and abort the host process.
+	try {
+		server->server->listen_after_bind();
+	} catch (...) {
+		server->is_running = false;
+	}
 }
 
 HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)

@@ -1,6 +1,7 @@
 #include "storage/quack_transaction.hpp"
 
 #include "duckdb/common/printer.hpp"
+#include "duckdb/main/client_context.hpp"
 #include "storage/quack_catalog.hpp"
 
 namespace duckdb {
