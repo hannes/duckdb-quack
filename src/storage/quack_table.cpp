@@ -78,7 +78,7 @@ FROM duckdb_views()
 TableFunction QuackTableCatalogEntry::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data_p) {
 	auto &quack_catalog = catalog.Cast<QuackCatalog>();
 	auto bind_data = make_uniq<QuackScanBindData>();
-	bind_data->client = quack_catalog.GetClient();
+	bind_data->client_connection = quack_catalog.GetClientConnection();
 	bind_data->table_name = name;
 	for (auto &col : GetColumns().Physical()) {
 		bind_data->column_names.push_back(col.Name());

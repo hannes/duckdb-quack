@@ -29,7 +29,7 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 	auto &http_util = HTTPUtil::Get(db);
 	auto request_url = uri.Http() + "/quack";
 	if (!http_params) {
-		if (context) {
+		if (context && context->transaction.HasActiveTransaction() ) {
 			http_params = http_util.InitializeParameters(*context, request_url);
 		} else {
 			http_params = http_util.InitializeParameters(db, request_url);
@@ -138,6 +138,7 @@ QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, Q
 }
 
 QuackClientConnection::~QuackClientConnection() {
+	Printer::PrintF("Closed client connection with %d connections in cache", cached_clients.size());
 }
 
 shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &context, const QuackUri &uri,

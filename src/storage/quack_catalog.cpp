@@ -25,8 +25,6 @@ QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri, C
     : Catalog(db_p) {
 	// connect to the server
 	client_connection = QuackClient::ConnectToServer(context, server_uri, token);
-	// create a client connection and keep it stored in the catalog
-	client = client_connection->GetClient(context);
 
 	// load the entire catalog up-front
 	auto load_info = LoadCatalog(context);
@@ -35,8 +33,8 @@ QuackCatalog::QuackCatalog(AttachedDatabase &db_p, const QuackUri &server_uri, C
 
 QuackLoadCatalogData QuackCatalog::LoadCatalog(ClientContext &context) {
 	QuackLoadCatalogData result;
-	result.schemas = ExecuteCommandInternal(QuackSchemaSet::GetLoadQuery(), context);
-	result.tables = ExecuteCommandInternal(QuackTableSet::GetLoadQuery(), context);
+	result.schemas = ExecuteCommandInternal(context, QuackSchemaSet::GetLoadQuery());
+	result.tables = ExecuteCommandInternal(context, QuackTableSet::GetLoadQuery());
 	return result;
 }
 
@@ -67,25 +65,24 @@ const QuackUri &QuackCatalog::GetServerUri() {
 	return client_connection->ServerURI();
 }
 
-unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(const string &query,
-                                                                      optional_ptr<ClientContext> context) {
+unique_ptr<ColumnDataCollection> QuackCatalog::ExecuteCommandInternal(ClientContext &context, const string &query) {
 	// FIXME this will break with many results!
 	auto chunk_collection = make_uniq<ColumnDataCollection>(Allocator::DefaultAllocator());
+	// get a client to query
+	auto client = client_connection->GetClient(context);
 	auto response =
 	    client->Request<PrepareResponseMessage>(context, make_uniq<PrepareRequestMessage>(GetConnectionId(), query));
 	chunk_collection->Initialize(response->Types());
 	for (auto &chunk : response->MutableResults()) {
 		chunk_collection->Append(chunk->Chunk());
 	}
+	// move the client back to the connection cache
+	client_connection->StoreClient(std::move(client));
 	return chunk_collection;
 }
 
-shared_ptr<QuackClientConnection> QuackCatalog::GetClient() {
+shared_ptr<QuackClientConnection> QuackCatalog::GetClientConnection() {
 	return client_connection;
-}
-
-QuackClient &QuackCatalog::GetRawClient() {
-	return *client;
 }
 
 const string &QuackCatalog::GetConnectionId() {

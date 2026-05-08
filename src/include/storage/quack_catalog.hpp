@@ -53,12 +53,11 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
-	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(const string &query, optional_ptr<ClientContext> context);
+	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(ClientContext &context, const string &query);
 	const QuackUri &GetServerUri();
 	const string &GetConnectionId();
 
-	QuackClient &GetRawClient();
-	shared_ptr<QuackClientConnection> GetClient();
+	shared_ptr<QuackClientConnection> GetClientConnection();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
@@ -67,7 +66,6 @@ private:
 
 private:
 	shared_ptr<QuackClientConnection> client_connection;
-	unique_ptr<QuackClient> client;
 	unique_ptr<QuackSchemaSet> schemas;
 };
 
