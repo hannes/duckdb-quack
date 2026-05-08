@@ -18,6 +18,7 @@
 #include "quack_startstop.hpp"
 #include "quack_storage.hpp"
 #include "quack_uri.hpp"
+#include "include/quack_startstop.hpp"
 #include "include/quack_storage.hpp"
 #include "include/quack_uri.hpp"
 
