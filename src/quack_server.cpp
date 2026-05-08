@@ -257,6 +257,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
+		if (connection_request_message.MinimumSupportedQuackVersion() > 1ULL) {
+			return make_uniq<ErrorResponse>("Unsupported Quack version - server only supports version 1 of quack");
+		}
 		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
 		        db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),

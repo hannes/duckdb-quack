@@ -25,19 +25,33 @@ unique_ptr<AppendRequestMessage> AppendRequestMessage::Deserialize(Deserializer 
 
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<string>(1, "auth_string", auth_string);
+	serializer.WritePropertyWithDefault<string>(2, "client_duckdb_version", client_duckdb_version);
+	serializer.WritePropertyWithDefault<string>(3, "client_platform", client_platform);
+	serializer.WritePropertyWithDefault<idx_t>(4, "min_supported_quack_version", min_supported_quack_version);
+	serializer.WritePropertyWithDefault<idx_t>(5, "max_supported_quack_version", max_supported_quack_version);
 }
 
 unique_ptr<ConnectionRequestMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<ConnectionRequestMessage>(new ConnectionRequestMessage());
 	deserializer.ReadPropertyWithDefault<string>(1, "auth_string", result->auth_string);
+	deserializer.ReadPropertyWithDefault<string>(2, "client_duckdb_version", result->client_duckdb_version);
+	deserializer.ReadPropertyWithDefault<string>(3, "client_platform", result->client_platform);
+	deserializer.ReadPropertyWithDefault<idx_t>(4, "min_supported_quack_version", result->min_supported_quack_version);
+	deserializer.ReadPropertyWithDefault<idx_t>(5, "max_supported_quack_version", result->max_supported_quack_version);
 	return result;
 }
 
 void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
+	serializer.WritePropertyWithDefault<string>(1, "server_duckdb_version", server_duckdb_version);
+	serializer.WritePropertyWithDefault<string>(2, "server_platform", server_platform);
+	serializer.WritePropertyWithDefault<idx_t>(3, "quack_version", quack_version);
 }
 
 unique_ptr<ConnectionResponseMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<ConnectionResponseMessage>(new ConnectionResponseMessage());
+	deserializer.ReadPropertyWithDefault<string>(1, "server_duckdb_version", result->server_duckdb_version);
+	deserializer.ReadPropertyWithDefault<string>(2, "server_platform", result->server_platform);
+	deserializer.ReadPropertyWithDefault<idx_t>(3, "quack_version", result->quack_version);
 	return result;
 }
 
