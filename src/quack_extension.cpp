@@ -18,6 +18,7 @@
 #include "quack_startstop.hpp"
 #include "quack_storage.hpp"
 #include "quack_uri.hpp"
+#include "include/quack_startstop.hpp"
 #include "include/quack_storage.hpp"
 #include "include/quack_uri.hpp"
 
@@ -113,6 +114,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(QuackScanFunction::GetFunction());
 	loader.RegisterFunction(QuackScanByNameFunction::GetFunction());
 	loader.RegisterFunction(QuackServeFunction::GetFunction());
+	loader.RegisterFunction(QuackServeFunctionDefaultUri::GetFunction());
 	loader.RegisterFunction(QuackStopFunction::GetFunction());
 	loader.RegisterFunction(QuackServerListFunction::GetFunction());
 	loader.RegisterFunction(GetQuackIdentifyFunction());

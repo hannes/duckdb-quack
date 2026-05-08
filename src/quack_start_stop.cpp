@@ -17,16 +17,21 @@ struct QuackStartStopFunctionData : public TableFunctionData {
 static unique_ptr<FunctionData> QuackServeBind(ClientContext &context, TableFunctionBindInput &input,
                                                vector<LogicalType> &return_types, vector<string> &names) {
 	auto bind_data = make_uniq<QuackStartStopFunctionData>();
-	auto &uri_value = input.inputs[0];
-	if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
-		throw InvalidInputException("Invalid listen string specified");
+	string listen_uri;
+	if (input.inputs.empty()) {
+		listen_uri = "quack:localhost";
+	} else {
+		auto &uri_value = input.inputs[0];
+		if (uri_value.IsNull() || uri_value.GetValue<string>().empty()) {
+			throw InvalidInputException("Invalid listen string specified");
+		}
+		listen_uri = uri_value.GetValue<string>();
 	}
 
 	auto allow_other_hostname = input.named_parameters.find("allow_other_hostname") != input.named_parameters.end() &&
 	                            input.named_parameters["allow_other_hostname"].GetValue<bool>();
 
-	bind_data->listen_uri =
-	    QuackUri(uri_value.GetValue<string>(), /* the server will always listen without SSL */ false);
+	bind_data->listen_uri = QuackUri(listen_uri, /* the server will always listen without SSL */ false);
 	if (!allow_other_hostname && !bind_data->listen_uri.IsLocal()) {
 		throw InvalidInputException(
 		    "Only localhost is allowed as a Quack RPC hostname by default, set allow_other_hostname=true to override. "
@@ -77,6 +82,15 @@ TableFunction QuackServeFunction::GetFunction() {
 	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
 	fun.named_parameters["token"] = LogicalType::VARCHAR;
 
+	return fun;
+}
+
+// TODO surely there is a better way to do this
+TableFunction QuackServeFunctionDefaultUri::GetFunction() {
+	auto fun = TableFunction("quack_serve", {}, QuackServe, QuackServeBind);
+	fun.named_parameters["disable_ssl"] = LogicalType::BOOLEAN;
+	fun.named_parameters["allow_other_hostname"] = LogicalType::BOOLEAN;
+	fun.named_parameters["token"] = LogicalType::VARCHAR;
 	return fun;
 }
 

@@ -9,6 +9,11 @@ public:
 	static TableFunction GetFunction();
 };
 
+class QuackServeFunctionDefaultUri {
+public:
+	static TableFunction GetFunction();
+};
+
 class QuackStopFunction {
 public:
 	static TableFunction GetFunction();
