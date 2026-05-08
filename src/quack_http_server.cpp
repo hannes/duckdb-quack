@@ -8,7 +8,6 @@
 
 namespace duckdb {
 
-
 void HttpQuackServer::StopAccepting() {
 	// Closes the listening socket only. Idempotent. Safe to call from a
 	// request-handler thread.
@@ -61,9 +60,9 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 	// from scan thread clients can deadlock waiting for threads held by the
 	// catalog clients that are in turn waiting for the scan to complete.
 	server->new_task_queue = [] {
-		return new duckdb_httplib::ThreadPool(4);
+		return new duckdb_httplib::ThreadPool(128);
 	};
-	server->set_keep_alive_max_count(4);
+	server->set_keep_alive_max_count(128);
 	server->set_keep_alive_timeout(10);
 	server->set_tcp_nodelay(true);
 

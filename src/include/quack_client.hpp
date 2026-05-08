@@ -9,10 +9,14 @@
 #include "quack_uri.hpp"
 
 namespace duckdb {
+class QuackClientConnection;
 
 class QuackClient {
 public:
-	explicit QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p) : db(db_p), uri(uri_p) {};
+	explicit QuackClient(DatabaseInstance &db_p, const QuackUri &uri_p) : db(db_p), uri(uri_p) {
+	}
+	virtual ~QuackClient() {
+	}
 
 	template <class TARGET>
 	unique_ptr<TARGET> Request(optional_ptr<ClientContext> context, unique_ptr<QuackMessage> request_message) {
@@ -32,7 +36,7 @@ public:
 	static unique_ptr<QuackClient> GetClient(DatabaseInstance &db, const QuackUri &uri);
 	static unique_ptr<QuackClient> GetClient(ClientContext &context, const QuackUri &uri);
 
-	virtual ~QuackClient() {};
+	static shared_ptr<QuackClientConnection> ConnectToServer(ClientContext &context, const QuackUri &uri, string token);
 
 protected:
 	mutex request_mutex;
@@ -43,6 +47,30 @@ protected:
 private:
 	virtual unique_ptr<QuackMessage> RequestInternal(optional_ptr<ClientContext> context,
 	                                                 unique_ptr<QuackMessage> request_message) = 0;
+};
+
+class QuackClientConnection {
+public:
+	explicit QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p);
+	~QuackClientConnection();
+
+	const string &ConnectionId() const {
+		return connection_id;
+	}
+	const QuackUri &ServerURI() const {
+		return uri;
+	}
+
+	//! Get a client (either a cached one, or open a new one if required)
+	unique_ptr<QuackClient> GetClient(ClientContext &context) const;
+	//! Return a client back to the cache
+	void StoreClient(unique_ptr<QuackClient> client_p);
+
+private:
+	QuackUri uri;
+	string connection_id;
+	mutable mutex lock;
+	mutable vector<unique_ptr<QuackClient>> cached_clients;
 };
 
 class HttpsQuackClient : public QuackClient {

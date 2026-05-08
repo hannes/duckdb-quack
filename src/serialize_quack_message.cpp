@@ -23,14 +23,6 @@ unique_ptr<AppendRequestMessage> AppendRequestMessage::Deserialize(Deserializer 
 	return result;
 }
 
-void AppendResponseMessage::Serialize(Serializer &serializer) const {
-}
-
-unique_ptr<AppendResponseMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto result = duckdb::unique_ptr<AppendResponseMessage>(new AppendResponseMessage());
-	return result;
-}
-
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<string>(1, "auth_string", auth_string);
 }
@@ -46,6 +38,14 @@ void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
 
 unique_ptr<ConnectionResponseMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<ConnectionResponseMessage>(new ConnectionResponseMessage());
+	return result;
+}
+
+void DisconnectMessage::Serialize(Serializer &serializer) const {
+}
+
+unique_ptr<DisconnectMessage> DisconnectMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<DisconnectMessage>(new DisconnectMessage());
 	return result;
 }
 
@@ -116,6 +116,14 @@ unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deseriali
 	auto needs_more_fetch = deserializer.ReadPropertyWithDefault<bool>(3, "needs_more_fetch");
 	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results");
 	auto result = duckdb::unique_ptr<PrepareResponseMessage>(new PrepareResponseMessage(std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch));
+	return result;
+}
+
+void SuccessResponse::Serialize(Serializer &serializer) const {
+}
+
+unique_ptr<SuccessResponse> SuccessResponse::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<SuccessResponse>(new SuccessResponse());
 	return result;
 }
 

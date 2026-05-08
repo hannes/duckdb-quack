@@ -2,7 +2,6 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
 #include "duckdb/main/secret/secret.hpp"
-#include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 
@@ -33,36 +32,21 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	}
 
 	auto bind_data = make_uniq<QuackScanBindData>();
-	bind_data->server_uri = QuackUri(initial_uri.Uri(), enable_ssl);
-	auto initial_client = QuackClient::GetClient(context, bind_data->server_uri);
+	auto server_uri = QuackUri(initial_uri.Uri(), enable_ssl);
 
 	// Resolve auth token: prefer a quack secret scoped to this URI; fall back to the
 	// global rpc_default_token setting. Mirrors the logic in QuackCatalog::QuackCatalog.
 	string token;
-
 	if (input.named_parameters.find("token") != input.named_parameters.end()) {
 		token = input.named_parameters["token"].GetValue<string>();
 	}
+	bind_data->client_connection = QuackClient::ConnectToServer(context, server_uri, token);
+	auto &client_connection = *bind_data->client_connection;
 
-	if (token.empty()) {
-		auto &secret_manager = SecretManager::Get(context);
-		auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
-		auto match = secret_manager.LookupSecret(transaction, bind_data->server_uri.Uri(), "quack");
-		if (match.HasMatch()) {
-			const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
-			token = kv.TryGetValue("token", true).ToString();
-		}
-	}
-	if (token.empty()) {
-		throw InvalidInputException("Could not find a Quack authentication token");
-	}
+	auto client = client_connection.GetClient(context);
 
-	auto connection_request_response =
-	    initial_client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
-	bind_data->connection_id = connection_request_response->ConnectionId();
-
-	auto bind_response = initial_client->Request<PrepareResponseMessage>(
-	    context, make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	auto bind_response = client->Request<PrepareResponseMessage>(
+	    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -71,7 +55,7 @@ static unique_ptr<FunctionData> QuackScanBind(ClientContext &context, TableFunct
 	bind_data->needs_more_fetch = bind_response->NeedsMoreFetch();
 
 	// store the initial client for later re-use
-	bind_data->SetInitialClient(std::move(initial_client));
+	client_connection.StoreClient(std::move(client));
 
 	return bind_data;
 }
@@ -106,11 +90,11 @@ static unique_ptr<FunctionData> QuackScanBindCatalogName(ClientContext &context,
 
 	auto query = input.inputs[1].GetValue<string>();
 	auto bind_data = make_uniq<QuackScanBindData>();
-	bind_data->server_uri = catalog.GetServerUri();
-	bind_data->connection_id = catalog.GetConnectionId();
-
-	auto bind_response = catalog.GetRawClient().Request<PrepareResponseMessage>(
-	    context, make_uniq<PrepareRequestMessage>(bind_data->connection_id, query));
+	bind_data->client_connection = catalog.GetClientConnection();
+	auto client = bind_data->client_connection->GetClient(context);
+	auto bind_response = client->Request<PrepareResponseMessage>(
+	    context, make_uniq<PrepareRequestMessage>(bind_data->client_connection->ConnectionId(), query));
+	bind_data->client_connection->StoreClient(std::move(client));
 
 	return_types = bind_response->Types();
 	names = bind_response->Names();
@@ -264,15 +248,17 @@ unique_ptr<GlobalTableFunctionState> QuackScanInitGlobal(ClientContext &context,
 	if (!bind_data.table_name.empty()) {
 		// apply pushdown to the query
 		auto query = BuildPushdownQuery(bind_data, input);
-		auto client = QuackClient::GetClient(context, bind_data.server_uri);
+		auto &client_connection = *bind_data.client_connection;
+		auto client = client_connection.GetClient(context);
 		auto response_message = client->Request<PrepareResponseMessage>(
-		    context, make_uniq<PrepareRequestMessage>(bind_data.connection_id, query));
+		    context, make_uniq<PrepareRequestMessage>(client_connection.ConnectionId(), query));
 		needs_more_fetch = response_message->NeedsMoreFetch();
 		// fetch the result
 		for (auto &chunk_ref : response_message->MutableResults()) {
 			auto &chunk = chunk_ref->Chunk();
 			results.emplace_back(chunk, ChunkResultPushdownType::PUSHDOWN_ALREADY_APPLIED);
 		}
+		client_connection.StoreClient(std::move(client));
 	} else {
 		for (auto &chunk_ref : bind_data.results) {
 			auto &chunk = chunk_ref->Chunk();
@@ -292,10 +278,7 @@ unique_ptr<LocalTableFunctionState> QuackScanInitLocal(ExecutionContext &context
 	auto local_state = make_uniq<QuackScanLocalState>();
 
 	// re-use initial client from bind if possible
-	local_state->client = bind_data.TryGetInitialClient();
-	if (!local_state->client) {
-		local_state->client = QuackClient::GetClient(context.client, bind_data.server_uri);
-	}
+	local_state->client = bind_data.client_connection->GetClient(context.client);
 	auto results = global_state.TryGetResults();
 	for (auto &chunk : results) {
 		local_state->results.push(std::move(chunk));
@@ -338,7 +321,7 @@ static void QuackScan(ClientContext &context, TableFunctionInput &input, DataChu
 		// if that did not work, we request more results
 		if (local_state.results.empty() && global_state.needs_more_fetch) {
 			auto fetch_response = local_state.client->Request<FetchResponseMessage>(
-			    context, make_uniq<FetchRequestMessage>(bind_data.connection_id));
+			    context, make_uniq<FetchRequestMessage>(bind_data.client_connection->ConnectionId()));
 
 			if (fetch_response->MutableResults().empty()) {
 				// server is done, we are done
@@ -369,7 +352,7 @@ static OperatorPartitionData QuackScanGetPartitionData(ClientContext &, TableFun
 InsertionOrderPreservingMap<string> QuackScanToString(TableFunctionToStringInput &input) {
 	auto &bind_data = input.bind_data->Cast<QuackScanBindData>();
 	InsertionOrderPreservingMap<string> result;
-	result["Server"] = bind_data.server_uri.Uri();
+	result["Server"] = bind_data.client_connection->ServerURI().Uri();
 	return result;
 }
 

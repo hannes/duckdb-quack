@@ -1,6 +1,6 @@
 # name: test/sql/authn_swap.test
 # description: swap quack_authentication_function and quack_authorization_function at runtime
-# group: [quack]
+# group: [sql]
 
 require quack
 

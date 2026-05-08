@@ -16,6 +16,7 @@ namespace duckdb {
 
 class QuackCatalog;
 class QuackClient;
+class QuackClientConnection;
 
 class QuackCatalog : public Catalog {
 public:
@@ -52,11 +53,11 @@ public:
 	bool InMemory() override;
 	string GetDBPath() override;
 
-	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(const string &query, optional_ptr<ClientContext> context);
+	unique_ptr<ColumnDataCollection> ExecuteCommandInternal(ClientContext &context, const string &query);
 	const QuackUri &GetServerUri();
 	const string &GetConnectionId();
 
-	QuackClient &GetRawClient();
+	shared_ptr<QuackClientConnection> GetClientConnection();
 
 private:
 	void DropSchema(ClientContext &context, DropInfo &info) override;
@@ -64,10 +65,8 @@ private:
 	QuackLoadCatalogData LoadCatalog(ClientContext &context);
 
 private:
-	QuackUri server_uri;
-	unique_ptr<QuackClient> client;
+	shared_ptr<QuackClientConnection> client_connection;
 	unique_ptr<QuackSchemaSet> schemas;
-	string connection_id;
 };
 
 } // namespace duckdb

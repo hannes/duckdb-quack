@@ -1,10 +1,11 @@
 #include "duckdb/main/database.hpp"
 #include "duckdb/main/extension_helper.hpp"
+#include "duckdb/main/secret/secret_manager.hpp"
 
 #include "quack_client.hpp"
 #include "quack_uri.hpp"
 
-using namespace duckdb;
+namespace duckdb {
 
 template <class T>
 string GetUriPart(T ele) {
@@ -28,7 +29,7 @@ unique_ptr<QuackMessage> HttpsQuackClient::RequestInternal(optional_ptr<ClientCo
 	auto &http_util = HTTPUtil::Get(db);
 	auto request_url = uri.Http() + "/quack";
 	if (!http_params) {
-		if (context) {
+		if (context && context->transaction.HasActiveTransaction()) {
 			http_params = http_util.InitializeParameters(*context, request_url);
 		} else {
 			http_params = http_util.InitializeParameters(db, request_url);
@@ -128,3 +129,66 @@ unique_ptr<QuackClient> QuackClient::GetClient(DatabaseInstance &db, const Quack
 unique_ptr<QuackClient> QuackClient::GetClient(ClientContext &context, const QuackUri &uri) {
 	return GetClient(*context.db, uri);
 }
+
+QuackClientConnection::QuackClientConnection(unique_ptr<QuackClient> client_p, QuackUri uri_p, string connection_id_p)
+    : uri(std::move(uri_p)), connection_id(std::move(connection_id_p)) {
+	if (client_p) {
+		cached_clients.push_back(std::move(client_p));
+	}
+}
+
+QuackClientConnection::~QuackClientConnection() {
+	if (!cached_clients.empty()) {
+		try {
+			auto &client = cached_clients.back();
+			client->Request<SuccessResponse>(nullptr, make_uniq<DisconnectMessage>(connection_id));
+		} catch (...) {
+		}
+	}
+}
+
+shared_ptr<QuackClientConnection> QuackClient::ConnectToServer(ClientContext &context, const QuackUri &uri,
+                                                               string token) {
+	// if no token is provided fetch it from the secret manager
+	if (token.empty()) {
+		auto &secret_manager = SecretManager::Get(context);
+		auto transaction = CatalogTransaction::GetSystemCatalogTransaction(context);
+		auto match = secret_manager.LookupSecret(transaction, uri.Uri(), "quack");
+		if (match.HasMatch()) {
+			const auto &kv = dynamic_cast<const KeyValueSecret &>(*match.secret_entry->secret);
+			token = kv.TryGetValue("token", true).ToString();
+		}
+	}
+	if (token.empty()) {
+		throw InvalidInputException("Could not find a Quack authentication token");
+	}
+
+	// open a HTTP client to the server
+	auto client = QuackClient::GetClient(context, uri);
+
+	// submit the connection request
+	auto connection_request_response =
+	    client->Request<ConnectionResponseMessage>(context, make_uniq<ConnectionRequestMessage>(token));
+	// success! we got a connection id
+	// construct the client connection and return it
+	auto connection_id = connection_request_response->ConnectionId();
+	return make_shared_ptr<QuackClientConnection>(std::move(client), uri, std::move(connection_id));
+}
+
+unique_ptr<QuackClient> QuackClientConnection::GetClient(ClientContext &context) const {
+	lock_guard<mutex> guard(lock);
+	if (!cached_clients.empty()) {
+		auto result = std::move(cached_clients.back());
+		cached_clients.pop_back();
+		return result;
+	}
+	// instantiate a new client and return it
+	return QuackClient::GetClient(context, uri);
+}
+
+void QuackClientConnection::StoreClient(unique_ptr<QuackClient> client_p) {
+	lock_guard<mutex> guard(lock);
+	cached_clients.push_back(std::move(client_p));
+}
+
+} // namespace duckdb

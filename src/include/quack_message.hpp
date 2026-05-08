@@ -14,7 +14,8 @@ enum class MessageType : uint8_t {
 	FETCH_REQUEST = 7,
 	FETCH_RESPONSE = 8,
 	APPEND_REQUEST = 9,
-	APPEND_RESPONSE = 10,
+	SUCCESS_RESPONSE = 10,
+	DISCONNECT_MESSAGE = 11,
 	ERROR_RESPONSE = 100
 };
 
@@ -291,14 +292,28 @@ private:
 	unique_ptr<DataChunkWrapper> append_chunk;
 };
 
-class AppendResponseMessage : public QuackMessage {
+class DisconnectMessage : public QuackMessage {
 public:
-	static constexpr MessageType TYPE = MessageType::APPEND_RESPONSE;
+	static constexpr MessageType TYPE = MessageType::DISCONNECT_MESSAGE;
 
-	explicit AppendResponseMessage() : QuackMessage(TYPE) {};
+	explicit DisconnectMessage(string connection_id_p) : QuackMessage(TYPE, std::move(connection_id_p)) {};
 
 	void Serialize(Serializer &serializer) const override;
-	static unique_ptr<AppendResponseMessage> Deserialize(Deserializer &deserializer);
+	static unique_ptr<DisconnectMessage> Deserialize(Deserializer &deserializer);
+
+protected:
+	DisconnectMessage() : QuackMessage(TYPE) {
+	}
+};
+
+class SuccessResponse : public QuackMessage {
+public:
+	static constexpr MessageType TYPE = MessageType::SUCCESS_RESPONSE;
+
+	explicit SuccessResponse() : QuackMessage(TYPE) {};
+
+	void Serialize(Serializer &serializer) const override;
+	static unique_ptr<SuccessResponse> Deserialize(Deserializer &deserializer);
 };
 
 class ErrorResponse : public QuackMessage {

@@ -55,11 +55,10 @@ unique_ptr<ColumnDataCollection> QuackTransaction::Query(const string &query) {
 	ForceStart();
 	auto context_ref = context.lock();
 	if (!context_ref) {
-		// Note: we are in a destructor, there is not much that we can do, queries can't
-		// go on the wire in any case, just NOP it is
+		// context has been destroyed - silently ignore the query
 		return nullptr;
 	}
-	return quack_catalog.ExecuteCommandInternal(query, context_ref.get());
+	return quack_catalog.ExecuteCommandInternal(*context_ref, query);
 }
 
 } // namespace duckdb
