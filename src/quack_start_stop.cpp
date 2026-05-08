@@ -61,8 +61,7 @@ static void QuackServe(ClientContext &context, TableFunctionInput &data_p, DataC
 		return;
 	}
 
-	auto &server =
-	    QuackStorageExtensionInfo::GetState(*context.db).CreateServer(context, bind_data.listen_uri, bind_data.token);
+	QuackStorageExtensionInfo::GetState(*context.db).CreateServer(context, bind_data.listen_uri, bind_data.token);
 	output.SetValue(0, 0, bind_data.listen_uri.Uri());
 	output.SetValue(1, 0, bind_data.listen_uri.Http());
 	output.SetValue(2, 0, bind_data.token);

@@ -321,7 +321,7 @@ public:
 	static constexpr MessageType TYPE = MessageType::ERROR_RESPONSE;
 	explicit ErrorResponse(ErrorData error_p) : QuackMessage(TYPE), error(std::move(error_p)) {
 	}
-	explicit ErrorResponse(const string &error_p) : QuackMessage(TYPE), error(error_p) {
+	explicit ErrorResponse(const string &error_p) : QuackMessage(TYPE), error(ExceptionType::INVALID_INPUT, error_p) {
 	}
 	template <typename... ARGS>
 	explicit ErrorResponse(const string &msg, ARGS &&...params)

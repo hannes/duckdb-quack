@@ -22,9 +22,8 @@ public:
 		auto response_message = RequestInternal(context, std::move(request_message));
 		if (response_message->Type() != TARGET::TYPE) {
 			if (response_message->Type() == MessageType::ERROR_RESPONSE) {
-				throw IOException("Expected %s message, got error message instead: %s",
-				                  MessageTypeToString(TARGET::TYPE),
-				                  response_message->Cast<ErrorResponse>().ErrorMessage());
+				// if we get an error throw it immediately
+				response_message->Cast<ErrorResponse>().Error().Throw();
 			}
 			throw IOException("Expected %s message, got %s instead", MessageTypeToString(TARGET::TYPE),
 			                  MessageTypeToString(response_message->Type()));
