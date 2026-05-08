@@ -11,10 +11,8 @@
 
 using namespace duckdb;
 
-QuackInsert::QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-                         physical_index_vector_t<idx_t> column_index_map_p)
-    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr),
-      column_index_map(std::move(column_index_map_p)) {
+QuackInsert::QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table)
+    : PhysicalOperator(physical_plan, PhysicalOperatorType::EXTENSION, op.types, 1), table(&table), schema(nullptr) {
 }
 
 QuackInsert::QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
@@ -106,7 +104,10 @@ InsertionOrderPreservingMap<string> QuackInsert::ParamsToString() const {
 PhysicalOperator &QuackCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
                                            optional_ptr<PhysicalOperator> plan) {
 	D_ASSERT(plan);
-	auto &insert = planner.Make<QuackInsert>(op, op.table, op.column_index_map);
+	if (!op.column_index_map.empty()) {
+		plan = planner.ResolveDefaultsProjection(op, *plan);
+	}
+	auto &insert = planner.Make<QuackInsert>(op, op.table);
 	insert.children.push_back(*plan);
 	return insert;
 }
