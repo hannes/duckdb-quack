@@ -1,13 +1,45 @@
-# Rpc
+# The Quack Client/Server Protocol for DuckDB
 
-This repository is based on https://github.com/duckdb/extension-template, check it out if you want to build and ship your own DuckDB extension.
+The `quack` extension adds a client-server protocol to DuckDB. With this extension, DuckDB can act as both a server and a client to communicate over network. For more details, please see the announcement and the DuckDB documentation. 
 
----
+## Usage Example
 
-This extension, Rpc, allow you to ... <extension_goal>.
+We have to install the extension in all involved DuckDB instances
+```SQL
+INSTALL quack FROM core_nightly;
+```
+
+Then, we can use one DuckDB instance a s a server like so:
+
+```SQL
+LOAD quack;
+CALL quack_serve('quack:localhost', token = 'super_secret');
+CREATE TABLE hello AS FROM VALUES ('world') v(s);
+```
+
+And talk to this server from another instance:
+
+```SQL
+LOAD quack;
+CREATE SECRET (TYPE quack, TOKEN 'super_secret');
+ATTACH 'quack:localhost' AS remote;
+FROM remote.hello;
+```
+
+This should show the content of the remote table `hello` on the client-side.
+
+We can also copy data from client to server:
+```SQL
+-- on client
+CREATE TABLE remote.hello2 AS FROM VALUES ('world2')v(s);
+```
+```SQL
+-- on server
+FROM hello2;
+```
 
 
-## Building
+## Development
 ### Managing dependencies
 DuckDB extensions uses VCPKG for dependency management. Enabling VCPKG is very simple: follow the [installation instructions](https://vcpkg.io/en/getting-started) or just run the following:
 ```shell
@@ -26,61 +58,15 @@ The main binaries that will be built are:
 ```sh
 ./build/release/duckdb
 ./build/release/test/unittest
-./build/release/extension/rpc/rpc.duckdb_extension
+./build/release/extension/quack/quack.duckdb_extension
 ```
 - `duckdb` is the binary for the duckdb shell with the extension code automatically loaded.
 - `unittest` is the test runner of duckdb. Again, the extension is already linked into the binary.
-- `rpc.duckdb_extension` is the loadable binary as it would be distributed.
+- `quack.duckdb_extension` is the loadable binary as it would be distributed.
 
-## Running the extension
-To run the extension code, simply start the shell with `./build/release/duckdb`.
-
-Now we can use the features from the extension directly in DuckDB. The template contains a single scalar function `rpc()` that takes a string arguments and returns a string:
-```
-D select rpc('Jane') as result;
-┌───────────────┐
-│    result     │
-│    varchar    │
-├───────────────┤
-│ Rpc Jane 🐥 │
-└───────────────┘
-```
-
-## Running the tests
+### Running the tests
 Different tests can be created for DuckDB extensions. The primary way of testing DuckDB extensions should be the SQL tests in `./test/sql`. These SQL tests can be run using:
 ```sh
 make test
 ```
 
-### Installing the deployed binaries
-To install your extension binaries from S3, you will need to do two things. Firstly, DuckDB should be launched with the
-`allow_unsigned_extensions` option set to true. How to set this will depend on the client you're using. Some examples:
-
-CLI:
-```shell
-duckdb -unsigned
-```
-
-Python:
-```python
-con = duckdb.connect(':memory:', config={'allow_unsigned_extensions' : 'true'})
-```
-
-NodeJS:
-```js
-db = new duckdb.Database(':memory:', {"allow_unsigned_extensions": "true"});
-```
-
-Secondly, you will need to set the repository endpoint in DuckDB to the HTTP url of your bucket + version of the extension
-you want to install. To do this run the following SQL query in DuckDB:
-```sql
-SET custom_extension_repository='bucket.s3.eu-west-1.amazonaws.com/<your_extension_name>/latest';
-```
-Note that the `/latest` path will allow you to install the latest extension version available for your current version of
-DuckDB. To specify a specific version, you can pass the version instead.
-
-After running these steps, you can install and load your extension using the regular INSTALL/LOAD commands in DuckDB:
-```sql
-INSTALL rpc
-LOAD rpc
-```
