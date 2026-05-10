@@ -23,47 +23,63 @@ unique_ptr<AppendRequestMessage> AppendRequestMessage::Deserialize(Deserializer 
 	return result;
 }
 
-void AppendResponseMessage::Serialize(Serializer &serializer) const {
-}
-
-unique_ptr<AppendResponseMessage> AppendResponseMessage::Deserialize(Deserializer &deserializer) {
-	auto result = duckdb::unique_ptr<AppendResponseMessage>(new AppendResponseMessage());
-	return result;
-}
-
 void ConnectionRequestMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<string>(1, "auth_string", auth_string);
+	serializer.WritePropertyWithDefault<string>(2, "client_duckdb_version", client_duckdb_version);
+	serializer.WritePropertyWithDefault<string>(3, "client_platform", client_platform);
+	serializer.WritePropertyWithDefault<idx_t>(4, "min_supported_quack_version", min_supported_quack_version);
+	serializer.WritePropertyWithDefault<idx_t>(5, "max_supported_quack_version", max_supported_quack_version);
 }
 
 unique_ptr<ConnectionRequestMessage> ConnectionRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<ConnectionRequestMessage>(new ConnectionRequestMessage());
 	deserializer.ReadPropertyWithDefault<string>(1, "auth_string", result->auth_string);
+	deserializer.ReadPropertyWithDefault<string>(2, "client_duckdb_version", result->client_duckdb_version);
+	deserializer.ReadPropertyWithDefault<string>(3, "client_platform", result->client_platform);
+	deserializer.ReadPropertyWithDefault<idx_t>(4, "min_supported_quack_version", result->min_supported_quack_version);
+	deserializer.ReadPropertyWithDefault<idx_t>(5, "max_supported_quack_version", result->max_supported_quack_version);
 	return result;
 }
 
 void ConnectionResponseMessage::Serialize(Serializer &serializer) const {
+	serializer.WritePropertyWithDefault<string>(1, "server_duckdb_version", server_duckdb_version);
+	serializer.WritePropertyWithDefault<string>(2, "server_platform", server_platform);
+	serializer.WritePropertyWithDefault<idx_t>(3, "quack_version", quack_version);
 }
 
 unique_ptr<ConnectionResponseMessage> ConnectionResponseMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<ConnectionResponseMessage>(new ConnectionResponseMessage());
+	deserializer.ReadPropertyWithDefault<string>(1, "server_duckdb_version", result->server_duckdb_version);
+	deserializer.ReadPropertyWithDefault<string>(2, "server_platform", result->server_platform);
+	deserializer.ReadPropertyWithDefault<idx_t>(3, "quack_version", result->quack_version);
 	return result;
 }
 
-void ErrorMessage::Serialize(Serializer &serializer) const {
-	serializer.WritePropertyWithDefault<string>(1, "message", message);
+void DisconnectMessage::Serialize(Serializer &serializer) const {
 }
 
-unique_ptr<ErrorMessage> ErrorMessage::Deserialize(Deserializer &deserializer) {
+unique_ptr<DisconnectMessage> DisconnectMessage::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<DisconnectMessage>(new DisconnectMessage());
+	return result;
+}
+
+void ErrorResponse::Serialize(Serializer &serializer) const {
+	serializer.WritePropertyWithDefault<string>(1, "message", error.RawMessage());
+}
+
+unique_ptr<ErrorResponse> ErrorResponse::Deserialize(Deserializer &deserializer) {
 	auto message = deserializer.ReadPropertyWithDefault<string>(1, "message");
-	auto result = duckdb::unique_ptr<ErrorMessage>(new ErrorMessage(std::move(message)));
+	auto result = duckdb::unique_ptr<ErrorResponse>(new ErrorResponse(std::move(message)));
 	return result;
 }
 
 void FetchRequestMessage::Serialize(Serializer &serializer) const {
+	serializer.WriteProperty<hugeint_t>(1, "uuid", uuid);
 }
 
 unique_ptr<FetchRequestMessage> FetchRequestMessage::Deserialize(Deserializer &deserializer) {
 	auto result = duckdb::unique_ptr<FetchRequestMessage>(new FetchRequestMessage());
+	deserializer.ReadProperty<hugeint_t>(1, "uuid", result->uuid);
 	return result;
 }
 
@@ -108,6 +124,7 @@ void PrepareResponseMessage::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<vector<string>>(2, "result_names", result_names);
 	serializer.WritePropertyWithDefault<bool>(3, "needs_more_fetch", needs_more_fetch);
 	serializer.WritePropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results", results);
+	serializer.WriteProperty<hugeint_t>(5, "result_uuid", result_uuid);
 }
 
 unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deserializer &deserializer) {
@@ -115,7 +132,16 @@ unique_ptr<PrepareResponseMessage> PrepareResponseMessage::Deserialize(Deseriali
 	auto result_names = deserializer.ReadPropertyWithDefault<vector<string>>(2, "result_names");
 	auto needs_more_fetch = deserializer.ReadPropertyWithDefault<bool>(3, "needs_more_fetch");
 	auto results = deserializer.ReadPropertyWithDefault<vector<unique_ptr<DataChunkWrapper>>>(4, "results");
-	auto result = duckdb::unique_ptr<PrepareResponseMessage>(new PrepareResponseMessage(std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch));
+	auto result_uuid = deserializer.ReadProperty<hugeint_t>(5, "result_uuid");
+	auto result = duckdb::unique_ptr<PrepareResponseMessage>(new PrepareResponseMessage(std::move(result_types), std::move(result_names), std::move(results), needs_more_fetch, result_uuid));
+	return result;
+}
+
+void SuccessResponse::Serialize(Serializer &serializer) const {
+}
+
+unique_ptr<SuccessResponse> SuccessResponse::Deserialize(Deserializer &deserializer) {
+	auto result = duckdb::unique_ptr<SuccessResponse>(new SuccessResponse());
 	return result;
 }
 

@@ -16,8 +16,7 @@ namespace duckdb {
 class QuackInsert : public PhysicalOperator {
 public:
 	//! INSERT INTO
-	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table,
-	            physical_index_vector_t<idx_t> column_index_map);
+	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, TableCatalogEntry &table);
 	//! CREATE TABLE AS
 	QuackInsert(PhysicalPlan &physical_plan, LogicalOperator &op, SchemaCatalogEntry &schema,
 	            unique_ptr<BoundCreateTableInfo> info);
@@ -28,8 +27,6 @@ public:
 	optional_ptr<SchemaCatalogEntry> schema;
 	//! Create table info, in case of CREATE TABLE AS
 	unique_ptr<BoundCreateTableInfo> info;
-	//! column_index_map
-	physical_index_vector_t<idx_t> column_index_map;
 	//! Whether we can keep the copy alive during Sink calls
 	bool keep_copy_alive = true;
 

@@ -5,6 +5,9 @@
 
 #include "quack_message.hpp"
 
+#include "quack_server.hpp"
+#include "duckdb/main/database.hpp"
+
 namespace duckdb {
 
 QuackMessage::QuackMessage(MessageType type) : header(type, string()) {
@@ -42,8 +45,11 @@ MessageType EnumUtil::FromString<MessageType>(const char *value) {
 	if (StringUtil::Equals(value, "APPEND_REQUEST")) {
 		return MessageType::APPEND_REQUEST;
 	}
-	if (StringUtil::Equals(value, "APPEND_RESPONSE")) {
-		return MessageType::APPEND_RESPONSE;
+	if (StringUtil::Equals(value, "SUCCESS_RESPONSE")) {
+		return MessageType::SUCCESS_RESPONSE;
+	}
+	if (StringUtil::Equals(value, "DISCONNECT_MESSAGE")) {
+		return MessageType::DISCONNECT_MESSAGE;
 	}
 	if (StringUtil::Equals(value, "ERROR_RESPONSE")) {
 		return MessageType::ERROR_RESPONSE;
@@ -69,8 +75,10 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 		return "FETCH_RESPONSE";
 	case MessageType::APPEND_REQUEST:
 		return "APPEND_REQUEST";
-	case MessageType::APPEND_RESPONSE:
-		return "APPEND_RESPONSE";
+	case MessageType::SUCCESS_RESPONSE:
+		return "SUCCESS_RESPONSE";
+	case MessageType::DISCONNECT_MESSAGE:
+		return "DISCONNECT_MESSAGE";
 	case MessageType::ERROR_RESPONSE:
 		return "ERROR_RESPONSE";
 
@@ -83,7 +91,7 @@ const char *EnumUtil::ToChars<MessageType>(MessageType value) {
 void QuackMessage::ToMemoryStream(MemoryStream &write_stream) const {
 	write_stream.Rewind();
 	SerializationOptions options;
-	options.serialization_compatibility = SerializationCompatibility::FromIndex(10);
+	options.serialization_compatibility = SerializationCompatibility::FromIndex(7);
 	BinarySerializer serializer(write_stream, options);
 
 	// write the header
@@ -112,10 +120,12 @@ unique_ptr<QuackMessage> QuackMessage::Deserialize(Deserializer &deserializer, M
 		return FetchResponseMessage::Deserialize(deserializer);
 	case MessageType::APPEND_REQUEST:
 		return AppendRequestMessage::Deserialize(deserializer);
-	case MessageType::APPEND_RESPONSE:
-		return AppendResponseMessage::Deserialize(deserializer);
+	case MessageType::SUCCESS_RESPONSE:
+		return SuccessResponse::Deserialize(deserializer);
+	case MessageType::DISCONNECT_MESSAGE:
+		return DisconnectMessage::Deserialize(deserializer);
 	case MessageType::ERROR_RESPONSE:
-		return ErrorMessage::Deserialize(deserializer);
+		return ErrorResponse::Deserialize(deserializer);
 	default:
 		throw InternalException("Unsupported type for message deserialization");
 	}
@@ -135,6 +145,17 @@ unique_ptr<QuackMessage> QuackMessage::DeserializeMessage(BinaryDeserializer &de
 	result->SetHeader(std::move(header));
 	deserializer.End();
 	return result;
+}
+
+ConnectionRequestMessage::ConnectionRequestMessage(const string &auth_string_p)
+    : QuackMessage(TYPE), auth_string(auth_string_p), client_duckdb_version(DuckDB::LibraryVersion()),
+      client_platform(DuckDB::Platform()), min_supported_quack_version(QuackServer::QUACK_VERSION),
+      max_supported_quack_version(QuackServer::QUACK_VERSION) {
+}
+
+ConnectionResponseMessage::ConnectionResponseMessage(string connection_id_p)
+    : QuackMessage(TYPE, std::move(connection_id_p)), server_duckdb_version(DuckDB::LibraryVersion()),
+      server_platform(DuckDB::Platform()), quack_version(QuackServer::QUACK_VERSION) {
 }
 
 unique_ptr<QuackMessage> QuackMessage::FromMemoryStream(MemoryStream &read_stream) {

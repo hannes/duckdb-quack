@@ -10,6 +10,7 @@
 #include "duckdb/main/secret/secret_manager.hpp"
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/storage/storage_extension.hpp"
+#include "storage/quack_optimizer.hpp"
 
 #include "include/storage/quack_catalog.hpp"
 #include "quack_extension.hpp"
@@ -18,6 +19,7 @@
 #include "quack_startstop.hpp"
 #include "quack_storage.hpp"
 #include "quack_uri.hpp"
+#include "include/quack_startstop.hpp"
 #include "include/quack_storage.hpp"
 #include "include/quack_uri.hpp"
 
@@ -114,6 +116,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(QuackScanByNameFunction::GetFunction());
 	loader.RegisterFunction(QuackServeFunction::GetFunction());
 	loader.RegisterFunction(QuackStopFunction::GetFunction());
+	loader.RegisterFunction(QuackServerListFunction::GetFunction());
 	loader.RegisterFunction(GetQuackIdentifyFunction());
 
 	// the default authentication function
@@ -144,9 +147,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	auto &config = DBConfig::GetConfig(loader.GetDatabaseInstance());
 	config.AddExtensionOption("quack_authentication_function", "Name of a callback function for authentication",
-	                          LogicalType::VARCHAR, Value("quack_check_token"));
+	                          LogicalType::VARCHAR, Value("quack_check_token"), nullptr, SetScope::GLOBAL);
 	config.AddExtensionOption("quack_authorization_function", "Name of a callback function for authorization",
-	                          LogicalType::VARCHAR, Value("quack_nop_authorization"));
+	                          LogicalType::VARCHAR, Value("quack_nop_authorization"), nullptr, SetScope::GLOBAL);
 
 	config.AddExtensionOption("quack_fetch_batch_chunks", "Maximum number of DataChunks returned per FETCH response",
 	                          LogicalType::UBIGINT, Value::UBIGINT(12));
@@ -194,6 +197,10 @@ static void LoadInternal(ExtensionLoader &loader) {
 	};
 	auto whoami_info = DefaultTableFunctionGenerator::CreateTableMacroInfo(whoami_macro);
 	loader.RegisterFunction(*whoami_info);
+
+	OptimizerExtension quack_optimizer;
+	quack_optimizer.optimize_function = QuackOptimizer::Optimize;
+	OptimizerExtension::Register(config, std::move(quack_optimizer));
 }
 
 void QuackExtension::Load(ExtensionLoader &loader) {

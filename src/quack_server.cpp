@@ -14,7 +14,12 @@
 #include "quack_log.hpp"
 #include "quack_storage.hpp"
 
-using namespace duckdb;
+namespace duckdb {
+QuackConnection::QuackConnection(string session_id_p) : session_id(std::move(session_id_p)) {
+}
+
+QuackConnection::~QuackConnection() {
+}
 
 void QuackServer::ValidateToken(const string &token) {
 	if (token.size() < 4) {
@@ -23,18 +28,18 @@ void QuackServer::ValidateToken(const string &token) {
 }
 
 QuackServer::QuackServer(ClientContext &context_p, const QuackUri &uri_p, const string &token_p)
-    : db(context_p.db), uri(uri_p), token(token_p) {
+    : db_ptr(context_p.db), uri(uri_p), token(token_p) {
 	ValidateToken(token);
 }
 
 QuackServer::~QuackServer() {
 }
 
-optional_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
+shared_ptr<QuackConnection> QuackServer::GetConnection(const string &connection_id) {
 	std::lock_guard<std::mutex> lock(active_connections_mutex);
 	auto it = active_connections.find(connection_id);
 	if (it != active_connections.end()) {
-		return it->second.get();
+		return it->second;
 	}
 	return nullptr;
 }
@@ -44,12 +49,28 @@ string QuackServer::CreateNewConnection(const string &session_id) {
 
 	D_ASSERT(active_connections.find(session_id) == active_connections.end());
 
-	auto new_connection = make_uniq<QuackConnection>();
+	auto db = db_ptr.lock();
+	if (!db) {
+		throw InternalException("Database was closed");
+	}
+	auto new_connection = make_shared_ptr<QuackConnection>(session_id);
 	new_connection->duckdb_connection = make_uniq<Connection>(*db);
 	new_connection->duckdb_connection->context->config.enable_progress_bar = false;
 	// new_connection->duckdb_connection->context->config.streaming_buffer_size = 10 * 1000000; // 10 MB
 	active_connections[session_id] = std::move(new_connection);
 	return session_id;
+}
+
+bool QuackServer::DisconnectConnection(const string &session_id) {
+	std::lock_guard<std::mutex> lock(active_connections_mutex);
+
+	auto entry = active_connections.find(session_id);
+	if (entry == active_connections.end()) {
+		// unknown client
+		return false;
+	}
+	active_connections.erase(entry);
+	return true;
 }
 
 static string GetSettingString(DatabaseInstance &db, const string &setting_name) {
@@ -104,6 +125,10 @@ string QuackServer::GenerateSessionId() {
 	{
 		std::lock_guard<std::mutex> lock(session_id_rng_mutex);
 		if (!session_id_rng) {
+			auto db = db_ptr.lock();
+			if (!db) {
+				throw InternalException("Database was closed");
+			}
 			auto encryption_util = db->GetEncryptionUtil(false);
 			auto metadata = make_uniq<EncryptionStateMetadata>(EncryptionTypes::GCM, kTokenBytes,
 			                                                   EncryptionTypes::EncryptionVersion::NONE);
@@ -129,6 +154,7 @@ bool ServerSupportsMessage(MessageType type) {
 	case MessageType::PREPARE_REQUEST:
 	case MessageType::FETCH_REQUEST:
 	case MessageType::APPEND_REQUEST:
+	case MessageType::DISCONNECT_MESSAGE:
 		return true;
 	default:
 		return false;
@@ -146,6 +172,10 @@ bool MessageRequiresConnection(MessageType type) {
 
 // main switcheroo happens here
 unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
+	auto db = db_ptr.lock();
+	if (!db) {
+		return make_uniq<ErrorResponse>("Database was closed");
+	}
 	auto &logger = Logger::Get(*db);
 	bool should_log = logger.ShouldLog(QuackLogType::NAME, QuackLogType::LEVEL);
 
@@ -165,16 +195,16 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 
 	// validate if the server can handle this type of message - the server cannot handle all message types
 	if (!ServerSupportsMessage(header.type)) {
-		return make_uniq<ErrorMessage>("Unsupported message type for server");
+		return make_uniq<ErrorResponse>("Unsupported message type for server");
 	}
 
 	// if the message requires it, obtain a connection
 	// these are basically all messages aside from connect request
-	optional_ptr<QuackConnection> connection;
+	shared_ptr<QuackConnection> connection;
 	if (MessageRequiresConnection(header.type)) {
 		connection = GetConnection(header.connection_id);
 		if (!connection) {
-			return make_uniq<ErrorMessage>("Invalid connection id");
+			return make_uniq<ErrorResponse>("Invalid connection id");
 		}
 	}
 
@@ -182,7 +212,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 	auto received_message = QuackMessage::DeserializeMessage(deserializer, header);
 
 	// process the message
-	auto response = HandleMessageInternal(*received_message, connection);
+	auto response = HandleMessageInternal(*db, *received_message, connection);
 
 	if (should_log) {
 		int64_t end_time = std::chrono::time_point_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now())
@@ -190,7 +220,7 @@ unique_ptr<QuackMessage> QuackServer::HandleMessage(MemoryStream &read_stream) {
 		                       .count();
 		string error;
 		if (response->Type() == MessageType::ERROR_RESPONSE) {
-			error = response->Cast<ErrorMessage>().Error();
+			error = response->Cast<ErrorResponse>().ErrorMessage();
 		}
 		auto msg = QuackLogType::ConstructLogMessage(header.type, header.connection_id, header.client_query_id,
 		                                             ExtractQuery(*received_message), "", end_time - start_time,
@@ -222,18 +252,28 @@ static vector<unique_ptr<DataChunkWrapper>> CreateBatch(Allocator &allocator, un
 	return results;
 }
 
-unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &received_message,
+unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(DatabaseInstance &db, QuackMessage &received_message,
                                                             optional_ptr<QuackConnection> connection_p) {
 	switch (received_message.Type()) {
 	case MessageType::CONNECTION_REQUEST: {
 		auto &connection_request_message = received_message.Cast<ConnectionRequestMessage>();
+		if (connection_request_message.MinimumSupportedQuackVersion() > 1ULL) {
+			return make_uniq<ErrorResponse>("Unsupported Quack version - server only supports version 1 of quack");
+		}
 		string session_id = GenerateSessionId();
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(*db, "quack_authentication_function")),
+		        db, StringUtil::Format("SELECT %s(?, ?, ?)", GetSettingString(db, "quack_authentication_function")),
 		        Value(session_id), Value(connection_request_message.AuthString()), Value(Token()))) {
-			return make_uniq<ErrorMessage>("Authentication failed");
+			return make_uniq<ErrorResponse>("Authentication failed");
 		}
 		return make_uniq<ConnectionResponseMessage>(CreateNewConnection(session_id));
+	}
+	case MessageType::DISCONNECT_MESSAGE: {
+		auto &connection = *connection_p;
+		if (!DisconnectConnection(connection.session_id)) {
+			return make_uniq<ErrorResponse>("Connection does not exist / already disconnected");
+		}
+		return make_uniq<SuccessResponse>();
 	}
 	case MessageType::PREPARE_REQUEST: {
 		auto &prepare_request_message = received_message.Cast<PrepareRequestMessage>();
@@ -241,9 +281,9 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 
 		// TODO do not do this if there is no fun set
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authorization_function")),
+		        db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
 		        Value(prepare_request_message.ConnectionId()), Value(prepare_request_message.Query()))) {
-			return make_uniq<ErrorMessage>("Authorization failed");
+			return make_uniq<ErrorResponse>("Authorization failed");
 		}
 
 		std::unique_lock<std::mutex> lock(connection.lock);
@@ -252,37 +292,38 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		{
 			auto query_result = connection.duckdb_connection->SendQuery(prepare_request_message.Query());
 			if (query_result->HasError()) {
-				return make_uniq<ErrorMessage>(query_result->GetError());
+				return make_uniq<ErrorResponse>(query_result->GetErrorObject());
 			}
 			if (query_result->names.empty()) {
-				return make_uniq<ErrorMessage>("Query did not return any columns");
+				return make_uniq<ErrorResponse>("Query did not return any columns");
 			}
 
 			connection.duckdb_query_result = std::move(query_result);
 		}
 		// Fresh query → restart batch numbering. Clients' local state is re-initialized on
 		// a new PREPARE, so indices start at 0 again.
-		connection.next_batch_index = 0;
+		connection.next_batch_index = 1;
+		// generate a random UUID to uniquely identify the result
+		connection.result_uuid = UUID::GenerateRandomUUID();
 
 		Value max_chunks_val;
-		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
+		DBConfig::GetConfig(db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
 
 		auto names = connection.duckdb_query_result->names;
 		auto types = connection.duckdb_query_result->types;
 
-		auto results = CreateBatch(Allocator::Get(*db), connection.duckdb_query_result, max_chunks_per_batch);
+		auto results = CreateBatch(Allocator::Get(db), connection.duckdb_query_result, max_chunks_per_batch);
 		if (connection.duckdb_query_result && connection.duckdb_query_result->HasError()) {
 			D_ASSERT(results.empty());
 
-			auto error_message = connection.duckdb_query_result->GetError();
+			auto error_message = connection.duckdb_query_result->GetErrorObject();
 			connection.duckdb_query_result.reset();
-			return make_uniq<ErrorMessage>(error_message);
+			return make_uniq<ErrorResponse>(std::move(error_message));
 		}
 		auto needs_more_fetch = results.size() == max_chunks_per_batch;
-		return make_uniq<PrepareResponseMessage>(types, names,
-
-		                                         std::move(results), needs_more_fetch);
+		return make_uniq<PrepareResponseMessage>(types, names, std::move(results), needs_more_fetch,
+		                                         connection.result_uuid);
 	}
 
 	case MessageType::FETCH_REQUEST: {
@@ -290,23 +331,26 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 		auto &connection = *connection_p;
 		std::unique_lock<std::mutex> lock(connection.lock);
 
+		if (connection.result_uuid != fetch_request_message.uuid) {
+			return make_uniq<ErrorResponse>("Result has been closed");
+		}
 		if (!connection.duckdb_query_result) {
 			return make_uniq<FetchResponseMessage>();
 		}
 		if (connection.duckdb_query_result->HasError()) {
-			return make_uniq<ErrorMessage>(connection.duckdb_query_result->GetError());
+			return make_uniq<ErrorResponse>(connection.duckdb_query_result->GetErrorObject());
 		}
 
 		Value max_chunks_val;
-		DBConfig::GetConfig(*db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
+		DBConfig::GetConfig(db).TryGetCurrentSetting("quack_fetch_batch_chunks", max_chunks_val);
 		auto max_chunks_per_batch = max_chunks_val.GetValue<uint64_t>();
 
-		auto results = CreateBatch(Allocator::Get(*db), connection.duckdb_query_result, max_chunks_per_batch);
+		auto results = CreateBatch(Allocator::Get(db), connection.duckdb_query_result, max_chunks_per_batch);
 		if (connection.duckdb_query_result && connection.duckdb_query_result->HasError()) { // TODO this is duplicated
 			D_ASSERT(results.empty());
-			auto error_message = connection.duckdb_query_result->GetError();
+			auto error_message = connection.duckdb_query_result->GetErrorObject();
 			connection.duckdb_query_result.reset();
-			return make_uniq<ErrorMessage>(error_message);
+			return make_uniq<ErrorResponse>(std::move(error_message));
 		}
 		auto assigned_batch_index = connection.next_batch_index++;
 		return make_uniq<FetchResponseMessage>(std::move(results), optional_idx(assigned_batch_index));
@@ -318,32 +362,39 @@ unique_ptr<QuackMessage> QuackServer::HandleMessageInternal(QuackMessage &receiv
 
 		// we never execute this query, but throw it at the authorization function so it can check if this user gets to
 		// insert into this table
-		auto dummy_insert_query = "INSERT INTO " + append_request_message.SchemaName() + "." +
-		                          append_request_message.TableName() + " VALUES (NULL)";
+		auto dummy_insert_query =
+		    StringUtil::Format("INSERT INTO %s.%s VALUES (NULL)", SQLIdentifier(append_request_message.SchemaName()),
+		                       SQLIdentifier(append_request_message.TableName()));
 
 		// TODO do not do this if there is no fun set
 		if (!EvaluateAuthQuery(
-		        *db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(*db, "quack_authorization_function")),
+		        db, StringUtil::Format("SELECT %s(?, ?)", GetSettingString(db, "quack_authorization_function")),
 		        Value(append_request_message.ConnectionId()), Value(dummy_insert_query))) {
-			return make_uniq<ErrorMessage>("Authorization failed");
+			return make_uniq<ErrorResponse>("Authorization failed");
 		}
 
 		std::unique_lock<std::mutex> lock(connection.lock);
 		auto &context = *connection.duckdb_connection->context;
 		auto table_info = context.TableInfo(append_request_message.SchemaName(), append_request_message.TableName());
 		if (!table_info) {
-			return make_uniq<ErrorMessage>(StringUtil::Format("Table %s.%s does not exist",
-			                                                  SQLIdentifier(append_request_message.SchemaName()),
-			                                                  SQLIdentifier(append_request_message.TableName())));
+			return make_uniq<ErrorResponse>("Table %s.%s does not exist",
+			                                SQLIdentifier(append_request_message.SchemaName()),
+			                                SQLIdentifier(append_request_message.TableName()));
 		}
-		ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
-		collection.Append(append_request_message.AppendChunk());
-		connection.duckdb_connection->Append(*table_info, collection);
-		return make_uniq<AppendResponseMessage>();
+		try {
+			ColumnDataCollection collection(Allocator::Get(context), append_request_message.AppendChunk().GetTypes());
+			collection.Append(append_request_message.AppendChunk());
+			connection.duckdb_connection->Append(*table_info, collection);
+		} catch (std::exception &ex) {
+			// apend failed - directly pass error to user
+			return make_uniq<ErrorResponse>(ErrorData(ex));
+		}
+		return make_uniq<SuccessResponse>();
 	}
 	default: {
-		return make_uniq<ErrorMessage>(
+		return make_uniq<ErrorResponse>(
 		    StringUtil::Format("Unimplemented message type %s", MessageTypeToString(received_message.Type())));
 	}
 	}
 }
+} // namespace duckdb
