@@ -13,8 +13,8 @@ struct ClearCacheFunctionData : public TableFunctionData {
 	bool finished = false;
 };
 
-unique_ptr<FunctionData> ClearCacheBind(ClientContext &, TableFunctionBindInput &,
-                                        vector<LogicalType> &return_types, vector<string> &names) {
+unique_ptr<FunctionData> ClearCacheBind(ClientContext &, TableFunctionBindInput &, vector<LogicalType> &return_types,
+                                        vector<string> &names) {
 	return_types.emplace_back(LogicalType::BOOLEAN);
 	names.emplace_back("Success");
 	return make_uniq<ClearCacheFunctionData>();
@@ -39,7 +39,6 @@ void ClearCacheFunction(ClientContext &context, TableFunctionInput &data_p, Data
 	ClearQuackCaches(context);
 	data.finished = true;
 }
-
 
 TableFunction QuackClearCacheFunction::GetFunction() {
 	return TableFunction("quack_clear_cache", {}, ClearCacheFunction, ClearCacheBind);
