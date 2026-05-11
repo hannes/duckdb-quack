@@ -32,6 +32,11 @@ select count(*), sum(i) from quack_query_by_name('rpc', 'from big_tbl')
 statement ok con2
 detach rpc;
 
+query II
+select count(*), sum(i) from quack_query({server}, 'from big_tbl', token='asdf')
+----
+10000000	49999995000000
+
 statement ok con1
 call quack_stop({server});
 
