@@ -55,7 +55,7 @@ PRAGMA threads=1;
 """)
         case Mode.POSTGRES:
             import psycopg2
-            con = psycopg2.connect(f'postgresql://{server_hostname}')
+            con = psycopg2.connect(f'postgresql://{server_hostname}', sslmode='disable')
             con.autocommit = True
 
         case Mode.ARROW:
