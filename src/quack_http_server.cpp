@@ -89,7 +89,7 @@ HttpQuackServer::HttpQuackServer(ClientContext &context_p, const QuackUri &uri_p
 		});
 		auto response = HandleMessage(stream);
 		response->ToMemoryStream(stream);
-		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/duckdb");
+		res.set_content((const char *)stream.GetData(), stream.GetPosition(), "application/vnd.duckdb");
 	});
 
 	if (!server->is_valid()) {
